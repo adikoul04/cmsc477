@@ -206,7 +206,7 @@ class GridMap:
 
     def grid_to_world_center(self, r: int, c: int) -> Tuple[float, float]:
         """Convert grid cell (r,c) to world (x,y) at cell center.
-        With TOP-LEFT origin: x increases right, y increases down.
+        Top-left origin: x increases right, y increases down.
         """
         x = self.ox + (c + 0.5) * self.cell
         y = self.oy + (r + 0.5) * self.cell
@@ -273,21 +273,13 @@ def densify(points: List[Tuple[float,float]], step_m: float = 0.08) -> List[Tupl
 
 def build_tag_world_map() -> Dict[int, TagWorldPose]:
     """
-    TODO: Fill from Figure 1 tag placements.
-
-    IDs visible in your Figure 1 screenshot:
-      left pillar: 30,31,32,33,34
-      top bar:     35,36
-      center stem: 37,38,39,40,41
-      right pillar:42,43,44,45,46
+    Tag placements from Figure 1.
 
     Coordinate convention (TOP-LEFT ORIGIN):
-      - origin (0,0) is TOP-LEFT CORNER of the grid
+      - origin (0,0) at top-left of grid
       - x increases right, y increases down
-      - cell (r,c) center is:
-          x = (c + 0.5)*CELL_SIZE_M
-          y = (r + 0.5)*CELL_SIZE_M
-      - yaw: 0 faces +x (right), +pi/2 faces +y (down), pi faces -x (left), -pi/2 faces -y (up)
+      - cell (r,c) center: x = (c+0.5)*CELL, y = (r+0.5)*CELL
+      - yaw: 0=right, π/2=down, π=left, -π/2=up
     """
     m: Dict[int, TagWorldPose] = {}
 
@@ -301,28 +293,27 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
     # -----------------------
 
     # Tag 30
-    # Block at (r=1, c=2)  [TOP-LEFT origin]
-    # Facing LEFT → left face of square
+    # Block at (r=1, c=2) → y = (1+0.5)*0.266 = 0.399
+    # Facing LEFT
     m[30] = TagWorldPose(x=0.665 - HALF, y=0.399, yaw=math.pi)
 
     # Tag 31
     # Block at (r=1, c=2)
-    # Facing RIGHT → right face of square
+    # Facing RIGHT
     m[31] = TagWorldPose(x=0.665 + HALF, y=0.399, yaw=0)
 
     # Tag 32
-    # Block at (r=3, c=2)
-    # Facing LEFT → left face
+    # Block at (r=3, c=2) → y = (3+0.5)*0.266 = 0.931
+    # Facing LEFT
     m[32] = TagWorldPose(x=0.665 - HALF, y=0.931, yaw=math.pi)
 
     # Tag 33
     # Block at (r=3, c=2)
-    # Facing RIGHT → right face
+    # Facing RIGHT
     m[33] = TagWorldPose(x=0.665 + HALF, y=0.931, yaw=0)
 
     # Tag 34
-    # Block at (r=4, c=2)
-    # Facing DOWN → bottom face (in top-left coords, down is +y direction, so +pi/2)
+    # Block at (r=4, c=2) → y_center = 1.197, facing DOWN (π/2)
     m[34] = TagWorldPose(x=0.665, y=1.197 + HALF, yaw=math.pi/2)
 
 
@@ -331,13 +322,11 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
     # -----------------------
 
     # Tag 35
-    # Block at (r=0, c=4)
-    # Facing DOWN → bottom face
+    # Block at (r=0, c=4) → y = (0+0.5)*0.266 = 0.133, facing DOWN (π/2)
     m[35] = TagWorldPose(x=1.197, y=0.133 + HALF, yaw=math.pi/2)
 
     # Tag 36
-    # Block at (r=0, c=6)
-    # Facing UP → top face (in top-left coords, down is y direction, so pi/2)
+    # Block at (r=0, c=6) → y = 0.133, facing DOWN (π/2)
     m[36] = TagWorldPose(x=1.729, y=0.133 + HALF, yaw=math.pi/2)
 
 
@@ -346,28 +335,23 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
     # -----------------------
 
     # Tag 37
-    # Block at (r=4, c=5)
-    # Facing UP → top face
+    # Block at (r=4, c=5) → y = 1.197, facing UP (-π/2)
     m[37] = TagWorldPose(x=1.463, y=1.197 - HALF, yaw=-math.pi/2)
 
     # Tag 38
-    # Block at (r=5, c=5)
-    # Facing LEFT → left face
+    # Block at (r=5, c=5) → y = 1.463, facing LEFT
     m[38] = TagWorldPose(x=1.463 - HALF, y=1.463, yaw=math.pi)
 
     # Tag 39
-    # Block at (r=5, c=5)
-    # Facing RIGHT → right face
+    # Block at (r=5, c=5) → facing RIGHT
     m[39] = TagWorldPose(x=1.463 + HALF, y=1.463, yaw=0)
 
     # Tag 40
-    # Block at (r=7, c=5)
-    # Facing LEFT → left face
+    # Block at (r=7, c=5) → y = 1.995, facing LEFT
     m[40] = TagWorldPose(x=1.463 - HALF, y=1.995, yaw=math.pi)
 
     # Tag 41
-    # Block at (r=7, c=5)
-    # Facing RIGHT → right face
+    # Block at (r=7, c=5) → facing RIGHT
     m[41] = TagWorldPose(x=1.463 + HALF, y=1.995, yaw=0)
 
 
@@ -376,28 +360,23 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
     # -----------------------
 
     # Tag 42
-    # Block at (r=1, c=8)
-    # Facing LEFT → left face
+    # Block at (r=1, c=8) → y = 0.399, facing LEFT
     m[42] = TagWorldPose(x=2.261 - HALF, y=0.399, yaw=math.pi)
 
     # Tag 43
-    # Block at (r=1, c=8)
-    # Facing RIGHT → right face
+    # Block at (r=1, c=8) → facing RIGHT
     m[43] = TagWorldPose(x=2.261 + HALF, y=0.399, yaw=0)
 
     # Tag 44
-    # Block at (r=3, c=8)
-    # Facing LEFT → left face
+    # Block at (r=3, c=8) → y = 0.931, facing LEFT
     m[44] = TagWorldPose(x=2.261 - HALF, y=0.931, yaw=math.pi)
 
     # Tag 45
-    # Block at (r=3, c=8)
-    # Facing RIGHT → right face
+    # Block at (r=3, c=8) → facing RIGHT
     m[45] = TagWorldPose(x=2.261 + HALF, y=0.931, yaw=0)
 
     # Tag 46
-    # Block at (r=4, c=8)
-    # Facing DOWN → bottom face
+    # Block at (r=4, c=8) → y = 1.197, facing DOWN (π/2)
     m[46] = TagWorldPose(x=2.261, y=1.197 + HALF, yaw=math.pi/2)
     return m
 
