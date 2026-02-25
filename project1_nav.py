@@ -279,12 +279,29 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
       - cell (r,c) center is:
           x = (c + 0.5)*CELL_SIZE_M
           y = (r + 0.5)*CELL_SIZE_M
-      - yaw: 0 faces +x (right), +pi/2 faces +y (up), pi faces -x, -pi/2 faces -y
+      - yaw: 0 faces +x (right), +pi/2 faces +y (up), pi faces -x (left), -pi/2 faces -y (down)
     """
     m: Dict[int, TagWorldPose] = {}
 
     # Fill like:
     # m[30] = TagWorldPose(x=..., y=..., yaw=...)
+    m[30] = TagWorldPose(x=7, y=2, yaw=math.pi)
+    m[31] = TagWorldPose(x=7, y=2, yaw=0)
+    m[32] = TagWorldPose(x=5, y=2, yaw=math.pi)
+    m[33] = TagWorldPose(x=5, y=2, yaw=0)
+    m[34] = TagWorldPose(x=4, y=2, yaw=-math.pi/2)
+    m[35] = TagWorldPose(x=8, y=4, yaw=-math.pi/2)
+    m[36] = TagWorldPose(x=8, y=6, yaw=-math.pi/2)
+    m[37] = TagWorldPose(x=4, y=5, yaw=math.pi/2)
+    m[38] = TagWorldPose(x=3, y=5, yaw=math.pi)
+    m[39] = TagWorldPose(x=3, y=5, yaw=0)
+    m[40] = TagWorldPose(x=1, y=5, yaw=math.pi)
+    m[41] = TagWorldPose(x=1, y=5, yaw=0)
+    m[42] = TagWorldPose(x=7, y=8, yaw=math.pi)
+    m[43] = TagWorldPose(x=7, y=8, yaw=0)
+    m[44] = TagWorldPose(x=5, y=8, yaw=math.pi)
+    m[45] = TagWorldPose(x=5, y=8, yaw=0)
+    m[46] = TagWorldPose(x=4, y=8, yaw=-math.pi/2)
     return m
 
 
