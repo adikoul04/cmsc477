@@ -68,6 +68,8 @@ OCC = np.array([[0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0],
                 [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], 
                 [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]], dtype=int)
 
+OCC = np.flipud(OCC)
+
 # Start / goal cells from Figure 1 screenshot
 START_RC = (5, 0)
 GOAL_RC  = (5, 10)
@@ -285,23 +287,112 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
 
     # Fill like:
     # m[30] = TagWorldPose(x=..., y=..., yaw=...)
-    m[30] = TagWorldPose(x=7, y=2, yaw=math.pi)
-    m[31] = TagWorldPose(x=7, y=2, yaw=0)
-    m[32] = TagWorldPose(x=5, y=2, yaw=math.pi)
-    m[33] = TagWorldPose(x=5, y=2, yaw=0)
-    m[34] = TagWorldPose(x=4, y=2, yaw=-math.pi/2)
-    m[35] = TagWorldPose(x=8, y=4, yaw=-math.pi/2)
-    m[36] = TagWorldPose(x=8, y=6, yaw=-math.pi/2)
-    m[37] = TagWorldPose(x=4, y=5, yaw=math.pi/2)
-    m[38] = TagWorldPose(x=3, y=5, yaw=math.pi)
-    m[39] = TagWorldPose(x=3, y=5, yaw=0)
-    m[40] = TagWorldPose(x=1, y=5, yaw=math.pi)
-    m[41] = TagWorldPose(x=1, y=5, yaw=0)
-    m[42] = TagWorldPose(x=7, y=8, yaw=math.pi)
-    m[43] = TagWorldPose(x=7, y=8, yaw=0)
-    m[44] = TagWorldPose(x=5, y=8, yaw=math.pi)
-    m[45] = TagWorldPose(x=5, y=8, yaw=0)
-    m[46] = TagWorldPose(x=4, y=8, yaw=-math.pi/2)
+    
+    HALF = 0.133  # CELL_SIZE_M / 2
+
+    # -----------------------
+    # Left vertical pillar
+    # -----------------------
+
+    # Tag 30
+    # Block at (r=2, c=7)
+    # Facing LEFT → left face of square
+    m[30] = TagWorldPose(x=1.995 - HALF, y=0.665, yaw=math.pi)
+
+    # Tag 31
+    # Block at (r=2, c=7)
+    # Facing RIGHT → right face of square
+    m[31] = TagWorldPose(x=1.995 + HALF, y=0.665, yaw=0)
+
+    # Tag 32
+    # Block at (r=2, c=5)
+    # Facing LEFT → left face
+    m[32] = TagWorldPose(x=1.463 - HALF, y=0.665, yaw=math.pi)
+
+    # Tag 33
+    # Block at (r=2, c=5)
+    # Facing RIGHT → right face
+    m[33] = TagWorldPose(x=1.463 + HALF, y=0.665, yaw=0)
+
+    # Tag 34
+    # Block at (r=2, c=4)
+    # Facing DOWN → bottom face
+    m[34] = TagWorldPose(x=1.197, y=0.665 - HALF, yaw=-math.pi/2)
+
+
+    # -----------------------
+    # Top horizontal bar
+    # -----------------------
+
+    # Tag 35
+    # Block at (r=4, c=8)
+    # Facing DOWN → bottom face
+    m[35] = TagWorldPose(x=2.261, y=1.197 - HALF, yaw=-math.pi/2)
+
+    # Tag 36
+    # Block at (r=6, c=8)
+    # Facing DOWN → bottom face
+    m[36] = TagWorldPose(x=2.261, y=1.729 - HALF, yaw=-math.pi/2)
+
+
+    # -----------------------
+    # Center vertical stem
+    # -----------------------
+
+    # Tag 37
+    # Block at (r=5, c=4)
+    # Facing UP → top face
+    m[37] = TagWorldPose(x=1.197, y=1.463 + HALF, yaw=math.pi/2)
+
+    # Tag 38
+    # Block at (r=5, c=3)
+    # Facing LEFT → left face
+    m[38] = TagWorldPose(x=0.931 - HALF, y=1.463, yaw=math.pi)
+
+    # Tag 39
+    # Block at (r=5, c=3)
+    # Facing RIGHT → right face
+    m[39] = TagWorldPose(x=0.931 + HALF, y=1.463, yaw=0)
+
+    # Tag 40
+    # Block at (r=5, c=1)
+    # Facing LEFT → left face
+    m[40] = TagWorldPose(x=0.399 - HALF, y=1.463, yaw=math.pi)
+
+    # Tag 41
+    # Block at (r=5, c=1)
+    # Facing RIGHT → right face
+    m[41] = TagWorldPose(x=0.399 + HALF, y=1.463, yaw=0)
+
+
+    # -----------------------
+    # Right vertical pillar
+    # -----------------------
+
+    # Tag 42
+    # Block at (r=8, c=7)
+    # Facing LEFT → left face
+    m[42] = TagWorldPose(x=1.995 - HALF, y=2.261, yaw=math.pi)
+
+    # Tag 43
+    # Block at (r=8, c=7)
+    # Facing RIGHT → right face
+    m[43] = TagWorldPose(x=1.995 + HALF, y=2.261, yaw=0)
+
+    # Tag 44
+    # Block at (r=8, c=5)
+    # Facing LEFT → left face
+    m[44] = TagWorldPose(x=1.463 - HALF, y=2.261, yaw=math.pi)
+
+    # Tag 45
+    # Block at (r=8, c=5)
+    # Facing RIGHT → right face
+    m[45] = TagWorldPose(x=1.463 + HALF, y=2.261, yaw=0)
+
+    # Tag 46
+    # Block at (r=8, c=4)
+    # Facing DOWN → bottom face
+    m[46] = TagWorldPose(x=1.197, y=2.261 - HALF, yaw=-math.pi/2)
     return m
 
 
