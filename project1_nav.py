@@ -494,6 +494,52 @@ def recovery_spin(ep_chassis, spin_deg_s: float = 15.0):
 
 
 # =========================
+# Odometry-based pose tracking
+# =========================
+
+class OdometryTracker:
+    """Track robot pose using odometry with AprilTag corrections"""
+    def __init__(self, initial_pose: Pose2D):
+        self.pose = initial_pose
+        self.last_update_time = time.time()
+    
+    def update_odometry(self, v: float, w_deg: float, dt: float):
+        """Update pose using velocity commands (simple odometry model)"""
+        w_rad = w_deg * math.pi / 180.0
+        
+        # Simple motion model: assumes constant velocity over dt
+        if abs(w_rad) < 1e-6:  # Moving straight
+            dx = v * dt * math.cos(self.pose.yaw)
+            dy = v * dt * math.sin(self.pose.yaw)
+            self.pose.x += dx
+            self.pose.y += dy
+        else:  # Turning
+            # Arc motion model
+            R = v / w_rad  # Radius of curvature
+            dtheta = w_rad * dt
+            
+            # Center of rotation in current frame
+            self.pose.x += R * (math.sin(self.pose.yaw + dtheta) - math.sin(self.pose.yaw))
+            self.pose.y += R * (-math.cos(self.pose.yaw + dtheta) + math.cos(self.pose.yaw))
+            self.pose.yaw = wrap_to_pi(self.pose.yaw + dtheta)
+    
+    def correct_with_tag(self, tag_pose: Pose2D, alpha: float = 0.5):
+        """Correct odometry pose using AprilTag observation"""
+        # Blend odometry with tag observation
+        self.pose.x = (1 - alpha) * self.pose.x + alpha * tag_pose.x
+        self.pose.y = (1 - alpha) * self.pose.y + alpha * tag_pose.y
+        
+        # Handle angle wrapping for yaw blending
+        u_odom = np.array([math.cos(self.pose.yaw), math.sin(self.pose.yaw)])
+        u_tag = np.array([math.cos(tag_pose.yaw), math.sin(tag_pose.yaw)])
+        u_blend = (1 - alpha) * u_odom + alpha * u_tag
+        self.pose.yaw = math.atan2(u_blend[1], u_blend[0])
+    
+    def get_pose(self) -> Pose2D:
+        return self.pose
+
+
+# =========================
 # Main
 # =========================
 
@@ -548,6 +594,12 @@ def main():
 
     traveled: List[Tuple[float,float]] = []
     dt = 1.0 / 15.0
+    
+    # Wait for first tag to initialize
+    odom_tracker: Optional[OdometryTracker] = None
+    last_v, last_w_deg = 0.0, 0.0
+    
+    print("Waiting for first AprilTag to initialize position...")
 
     try:
         while True:
@@ -565,21 +617,42 @@ def main():
             if cv2.waitKey(1) == ord('q'):
                 break
 
-            if not detections:
-                recovery_spin(ep_chassis)
-                time.sleep(dt)
+            # Initialize odometry with first tag detection
+            if odom_tracker is None:
+                if detections:
+                    det = detections[0]
+                    initial_pose = localizer.estimate_robot_pose(det)
+                    if initial_pose is not None:
+                        odom_tracker = OdometryTracker(initial_pose)
+                        print(f"Initialized at: x={initial_pose.x:.3f}, y={initial_pose.y:.3f}, yaw={math.degrees(initial_pose.yaw):.1f}°")
+                        print(f"Detected tag ID: {det.tag_id}")
+                else:
+                    # Spin slowly to find a tag
+                    recovery_spin(ep_chassis, spin_deg_s=20.0)
+                    time.sleep(dt)
                 continue
-
-            det = detections[0]  # single-tag workflow
-            pose = localizer.estimate_robot_pose(det)
-            if pose is None:
-                recovery_spin(ep_chassis)
-                time.sleep(dt)
-                continue
-
-            traveled.append((pose.x, pose.y))
-            v, w_deg = follower.command(pose)
+            
+            # Update odometry with last commanded velocities
+            odom_tracker.update_odometry(last_v, last_w_deg, dt)
+            
+            # If we see a tag, correct the odometry
+            if detections:
+                det = detections[0]
+                tag_pose = localizer.estimate_robot_pose(det)
+                if tag_pose is not None:
+                    odom_tracker.correct_with_tag(tag_pose, alpha=0.6)
+                    print(f"Tag {det.tag_id} correction: x={tag_pose.x:.3f}, y={tag_pose.y:.3f}")
+            
+            # Get current pose from odometry (corrected if tag was seen)
+            current_pose = odom_tracker.get_pose()
+            traveled.append((current_pose.x, current_pose.y))
+            
+            # Compute control commands based on path
+            v, w_deg = follower.command(current_pose)
             ep_chassis.drive_speed(x=v, y=0.0, z=w_deg, timeout=1)
+            
+            # Store commands for next odometry update
+            last_v, last_w_deg = v, w_deg
 
             if follower.done():
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
