@@ -494,49 +494,161 @@ def recovery_spin(ep_chassis, spin_deg_s: float = 15.0):
 
 
 # =========================
-# Odometry-based pose tracking
+# Grid-based path execution
 # =========================
 
-class OdometryTracker:
-    """Track robot pose using odometry with AprilTag corrections"""
-    def __init__(self, initial_pose: Pose2D):
-        self.pose = initial_pose
-        self.last_update_time = time.time()
+@dataclass
+class PathSegment:
+    """A single move or turn command"""
+    cmd_type: str  # "turn" or "move"
+    value: float   # degrees for turn, meters for move
+    start_rc: Tuple[int, int]  # grid cell at start of segment
+    end_rc: Tuple[int, int]    # grid cell at end of segment
+
+def path_to_segments(path_rc: List[Tuple[int,int]], cell_size_m: float) -> List[PathSegment]:
+    """Convert grid path to turn/move segments with exact distances"""
+    if len(path_rc) < 2:
+        return []
     
-    def update_odometry(self, v: float, w_deg: float, dt: float):
-        """Update pose using velocity commands (simple odometry model)"""
-        w_rad = w_deg * math.pi / 180.0
+    segments = []
+    current_yaw = 0.0  # Start facing right (0°)
+    
+    for i in range(len(path_rc) - 1):
+        r1, c1 = path_rc[i]
+        r2, c2 = path_rc[i + 1]
         
-        # Simple motion model: assumes constant velocity over dt
-        if abs(w_rad) < 1e-6:  # Moving straight
-            dx = v * dt * math.cos(self.pose.yaw)
-            dy = v * dt * math.sin(self.pose.yaw)
-            self.pose.x += dx
-            self.pose.y += dy
-        else:  # Turning
-            # Arc motion model
-            R = v / w_rad  # Radius of curvature
-            dtheta = w_rad * dt
+        # Determine direction of movement
+        dr, dc = r2 - r1, c2 - c1
+        
+        # Calculate desired yaw: 0=right, π/2=down, π=left, -π/2=up
+        if dc > 0:  # Moving right
+            desired_yaw = 0.0
+        elif dc < 0:  # Moving left
+            desired_yaw = math.pi
+        elif dr > 0:  # Moving down
+            desired_yaw = math.pi / 2
+        else:  # Moving up
+            desired_yaw = -math.pi / 2
+        
+        # Calculate turn needed
+        turn_angle = wrap_to_pi(desired_yaw - current_yaw)
+        
+        # Add turn segment if needed
+        if abs(turn_angle) > 0.01:  # More than ~0.5 degrees
+            segments.append(PathSegment(
+                cmd_type="turn",
+                value=math.degrees(turn_angle),
+                start_rc=(r1, c1),
+                end_rc=(r1, c1)
+            ))
+            current_yaw = desired_yaw
+        
+        # Add move segment (one cell)
+        distance = cell_size_m * math.sqrt(dr*dr + dc*dc)
+        segments.append(PathSegment(
+            cmd_type="move",
+            value=distance,
+            start_rc=(r1, c1),
+            end_rc=(r2, c2)
+        ))
+    
+    return segments
+
+def find_critical_tags(path_rc: List[Tuple[int,int]], tag_map: Dict[int, TagWorldPose], 
+                       grid: GridMap) -> Dict[int, List[int]]:
+    """
+    Find critical tags at turning waypoints.
+    Critical tags are directly in front of the robot at points where it needs to turn
+    after completing a straight segment. Used for alignment before executing the turn.
+    
+    Grid alignment requirement:
+    - If robot facing left/right: tag must be in same row
+    - If robot facing up/down: tag must be in same column
+    
+    Returns: waypoint_index -> list of tag IDs that should be visible for alignment
+    """
+    def world_to_grid_cell(wx: float, wy: float) -> Tuple[int, int]:
+        """Convert world coordinates back to grid cell (row, col)"""
+        c = int((wx - grid.origin_x) / grid.cell)
+        r = int((wy - grid.origin_y) / grid.cell)
+        return r, c
+    
+    critical_tags = {}
+    
+    for i in range(1, len(path_rc) - 1):  # Skip start and goal
+        r_prev, c_prev = path_rc[i-1]
+        r_curr, c_curr = path_rc[i]
+        r_next, c_next = path_rc[i+1]
+        
+        # Check if this is a turning point
+        dr_in = r_curr - r_prev
+        dc_in = c_curr - c_prev
+        dr_out = r_next - r_curr
+        dc_out = c_next - c_curr
+        
+        # If direction changes, this is a turning waypoint
+        if (dr_in, dc_in) != (dr_out, dc_out):
+            # Robot's current heading (from previous segment)
+            if dc_in > 0:  # Came from left, facing right
+                robot_yaw = 0.0
+                is_horizontal = True
+            elif dc_in < 0:  # Came from right, facing left
+                robot_yaw = math.pi
+                is_horizontal = True
+            elif dr_in > 0:  # Came from above, facing down
+                robot_yaw = math.pi / 2
+                is_horizontal = False
+            else:  # Came from below, facing up
+                robot_yaw = -math.pi / 2
+                is_horizontal = False
             
-            # Center of rotation in current frame
-            self.pose.x += R * (math.sin(self.pose.yaw + dtheta) - math.sin(self.pose.yaw))
-            self.pose.y += R * (-math.cos(self.pose.yaw + dtheta) + math.cos(self.pose.yaw))
-            self.pose.yaw = wrap_to_pi(self.pose.yaw + dtheta)
+            # Robot position at turning point
+            rx, ry = grid.grid_to_world_center(r_curr, c_curr)
+            
+            # Find tags directly in front (before the turn)
+            tags_in_front = []
+            max_view_distance = 1.0  # meters
+            angle_tolerance = math.radians(30)  # ±30 degrees for "directly in front"
+            
+            for tag_id, tag_pose in tag_map.items():
+                # Convert tag position to grid coordinates
+                tag_r, tag_c = world_to_grid_cell(tag_pose.x, tag_pose.y)
+                
+                # Check grid alignment
+                if is_horizontal:
+                    # Facing left/right: tag must be in same row
+                    if tag_r != r_curr:
+                        continue
+                else:
+                    # Facing up/down: tag must be in same column
+                    if tag_c != c_curr:
+                        continue
+                
+                # Vector from robot to tag
+                dx = tag_pose.x - rx
+                dy = tag_pose.y - ry
+                distance = math.hypot(dx, dy)
+                
+                if distance < 0.05 or distance > max_view_distance:
+                    continue
+                
+                # Angle to tag from robot's current heading
+                angle_to_tag = math.atan2(dy, dx)
+                angle_diff = abs(wrap_to_pi(angle_to_tag - robot_yaw))
+                
+                # Tag is "in front" if aligned with current heading
+                if angle_diff < angle_tolerance:
+                    # Verify tag is facing toward robot
+                    tag_to_robot_direction = wrap_to_pi(angle_to_tag + math.pi)
+                    facing_diff = abs(wrap_to_pi(tag_pose.yaw - tag_to_robot_direction))
+                    
+                    if facing_diff < math.radians(60):
+                        tags_in_front.append(tag_id)
+            
+            if tags_in_front:
+                critical_tags[i] = sorted(tags_in_front)
     
-    def correct_with_tag(self, tag_pose: Pose2D, alpha: float = 0.5):
-        """Correct odometry pose using AprilTag observation"""
-        # Blend odometry with tag observation
-        self.pose.x = (1 - alpha) * self.pose.x + alpha * tag_pose.x
-        self.pose.y = (1 - alpha) * self.pose.y + alpha * tag_pose.y
-        
-        # Handle angle wrapping for yaw blending
-        u_odom = np.array([math.cos(self.pose.yaw), math.sin(self.pose.yaw)])
-        u_tag = np.array([math.cos(tag_pose.yaw), math.sin(tag_pose.yaw)])
-        u_blend = (1 - alpha) * u_odom + alpha * u_tag
-        self.pose.yaw = math.atan2(u_blend[1], u_blend[0])
-    
-    def get_pose(self) -> Pose2D:
-        return self.pose
+    return critical_tags
 
 
 # =========================
@@ -563,23 +675,28 @@ def main():
         print(f"  {i:2d}: (r={r}, c={c:2d}) -> world ({wx:.3f}, {wy:.3f})")
     print(f"======================================\n")
     
-    path_xy = densify([grid.grid_to_world_center(r,c) for (r,c) in path_rc], step_m=0.08)
+    # Convert to discrete segments
+    segments = path_to_segments(path_rc, CELL_SIZE_M)
+    print(f"\n=== Path Segments ===")
+    for i, seg in enumerate(segments):
+        if seg.cmd_type == "turn":
+            print(f"  {i:2d}: TURN {seg.value:6.1f}° at {seg.start_rc}")
+        else:
+            print(f"  {i:2d}: MOVE {seg.value:.3f}m from {seg.start_rc} to {seg.end_rc}")
+    print(f"=====================\n")
+    
+    # Find critical tags at vertices
+    tag_world_map = build_tag_world_map()
+    critical_tags = find_critical_tags(path_rc, tag_world_map, grid)
+    print(f"\n=== Critical Tags at Vertices ===")
+    for waypoint_idx, tag_ids in critical_tags.items():
+        r, c = path_rc[waypoint_idx]
+        print(f"  Waypoint {waypoint_idx} (r={r}, c={c}): Tags {tag_ids}")
+    print(f"=================================\n")
 
     # AprilTag + localization
-    tag_world_map = build_tag_world_map()
     T_rc = build_T_rc()
     localizer = Localizer(tag_world_map, T_rc)
-
-    # Controller params (TODO tune)
-    p = ControlParams(
-        v_max=0.20,
-        w_max_deg=60.0,
-        k_v=0.8,
-        k_w=2.0,
-        waypoint_tol=0.12,
-        lookahead=0.25,
-    )
-    follower = WaypointFollower(path_xy, p)
 
     # Robot setup
     ep_robot = robot.Robot()
@@ -593,73 +710,104 @@ def main():
     detector = AprilTagDetector(K=K, family=TAG_FAMILY, threads=2, marker_size_m=TAG_SIZE_M)
 
     traveled: List[Tuple[float,float]] = []
-    dt = 1.0 / 15.0
     
-    # Wait for first tag to initialize
-    odom_tracker: Optional[OdometryTracker] = None
-    last_v, last_w_deg = 0.0, 0.0
-    
-    print("Waiting for first AprilTag to initialize position...")
-
-    try:
-        while True:
-            try:
-                img = ep_camera.read_cv2_image(strategy="newest", timeout=0.5)
-            except Empty:
-                time.sleep(0.001)
-                continue
-
+    # Initialize with first tag
+    print("Looking for first AprilTag to initialize...")
+    initial_pose = None
+    while initial_pose is None:
+        try:
+            img = ep_camera.read_cv2_image(strategy="newest", timeout=0.5)
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
             detections = detector.find_tags(gray)
-
-            draw_detections(img, detections)
-            cv2.imshow("img", img)
-            if cv2.waitKey(1) == ord('q'):
-                break
-
-            # Initialize odometry with first tag detection
-            if odom_tracker is None:
-                if detections:
-                    det = detections[0]
-                    initial_pose = localizer.estimate_robot_pose(det)
-                    if initial_pose is not None:
-                        odom_tracker = OdometryTracker(initial_pose)
-                        print(f"Initialized at: x={initial_pose.x:.3f}, y={initial_pose.y:.3f}, yaw={math.degrees(initial_pose.yaw):.1f}°")
-                        print(f"Detected tag ID: {det.tag_id}")
-                else:
-                    # Spin slowly to find a tag
-                    recovery_spin(ep_chassis, spin_deg_s=20.0)
-                    time.sleep(dt)
-                continue
             
-            # Update odometry with last commanded velocities
-            odom_tracker.update_odometry(last_v, last_w_deg, dt)
-            
-            # If we see a tag, correct the odometry
             if detections:
                 det = detections[0]
-                tag_pose = localizer.estimate_robot_pose(det)
-                if tag_pose is not None:
-                    odom_tracker.correct_with_tag(tag_pose, alpha=0.6)
-                    print(f"Tag {det.tag_id} correction: x={tag_pose.x:.3f}, y={tag_pose.y:.3f}")
+                initial_pose = localizer.estimate_robot_pose(det)
+                if initial_pose is not None:
+                    print(f"Initialized with Tag {det.tag_id}: x={initial_pose.x:.3f}, y={initial_pose.y:.3f}, yaw={math.degrees(initial_pose.yaw):.1f}°")
+            else:
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=20.0, timeout=1)
+                time.sleep(0.1)
+        except Empty:
+            time.sleep(0.001)
+    
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
+    time.sleep(0.5)
+    
+    # Execute segments
+    current_pose = initial_pose
+    waypoint_idx = 0
+    
+    try:
+        for seg_idx, seg in enumerate(segments):
+            print(f"\n--- Executing Segment {seg_idx} ---")
             
-            # Get current pose from odometry (corrected if tag was seen)
-            current_pose = odom_tracker.get_pose()
-            traveled.append((current_pose.x, current_pose.y))
-            
-            # Compute control commands based on path
-            v, w_deg = follower.command(current_pose)
-            ep_chassis.drive_speed(x=v, y=0.0, z=w_deg, timeout=1)
-            
-            # Store commands for next odometry update
-            last_v, last_w_deg = v, w_deg
-
-            if follower.done():
+            if seg.cmd_type == "turn":
+                # Execute turn
+                print(f"Turning {seg.value:.1f}°...")
+                turn_speed = 30.0 if seg.value > 0 else -30.0
+                turn_duration = abs(seg.value) / abs(turn_speed)
+                
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=turn_speed, timeout=5)
+                time.sleep(turn_duration)
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
-                print("Reached goal.")
-                break
-
-            time.sleep(dt)
+                
+                # Update expected pose
+                current_pose.yaw = wrap_to_pi(current_pose.yaw + math.radians(seg.value))
+                time.sleep(0.3)
+                
+            else:  # move
+                # Execute straight move
+                print(f"Moving {seg.value:.3f}m forward...")
+                move_speed = 0.15
+                move_duration = seg.value / move_speed
+                
+                ep_chassis.drive_speed(x=move_speed, y=0.0, z=0.0, timeout=5)
+                time.sleep(move_duration)
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
+                
+                # Update expected pose
+                current_pose.x += seg.value * math.cos(current_pose.yaw)
+                current_pose.y += seg.value * math.sin(current_pose.yaw)
+                
+                waypoint_idx += 1
+                time.sleep(0.3)
+                
+                # Check for critical tags at this waypoint
+                if waypoint_idx in critical_tags:
+                    print(f"At waypoint {waypoint_idx}, checking for critical tags: {critical_tags[waypoint_idx]}")
+                    
+                    # Look for tags
+                    tag_found = False
+                    for attempt in range(10):  # Try for ~0.5 seconds
+                        try:
+                            img = ep_camera.read_cv2_image(strategy="newest", timeout=0.1)
+                            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
+                            detections = detector.find_tags(gray)
+                            
+                            if detections:
+                                det = detections[0]
+                                if det.tag_id in critical_tags[waypoint_idx]:
+                                    tag_pose = localizer.estimate_robot_pose(det)
+                                    if tag_pose is not None:
+                                        print(f"  ✓ Found Tag {det.tag_id}")
+                                        print(f"  Expected: x={current_pose.x:.3f}, y={current_pose.y:.3f}, yaw={math.degrees(current_pose.yaw):.1f}°")
+                                        print(f"  Observed: x={tag_pose.x:.3f}, y={tag_pose.y:.3f}, yaw={math.degrees(tag_pose.yaw):.1f}°")
+                                        
+                                        # Correct pose to align with grid
+                                        current_pose = tag_pose
+                                        tag_found = True
+                                        break
+                        except Empty:
+                            pass
+                        time.sleep(0.05)
+                    
+                    if not tag_found:
+                        print(f"  ⚠ Warning: Expected tag not found, continuing with odometry")
+                
+                traveled.append((current_pose.x, current_pose.y))
+        
+        print("\n✓ Reached goal!")
 
     except KeyboardInterrupt:
         pass
@@ -675,10 +823,7 @@ def main():
         ep_robot.close()
         cv2.destroyAllWindows()
 
-        # TODO: save logs for report plot
-        # np.savetxt("planned.csv", np.array(path_xy), delimiter=",", header="x,y", comments="")
-        # np.savetxt("traveled.csv", np.array(traveled), delimiter=",", header="x,y", comments="")
-        print("Planned points:", len(path_xy), "traveled samples:", len(traveled))
+        print(f"Traveled points: {len(traveled)}")
 
 
 if __name__ == "__main__":
