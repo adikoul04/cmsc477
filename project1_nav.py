@@ -71,10 +71,54 @@ OCC = np.array([[0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0],  # Row 0 (top)
                 [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],  # Row 7
                 [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]], dtype=int)  # Row 8 (bottom)
 
-# Start / goal cells - using TOP-LEFT origin
-# Start is bottom-left area, Goal is bottom-right area
-START_RC = (3, 0)   
-GOAL_RC  = (3, 10)
+# Positions stored as (row+0.5, col+0.5) - cell centers in grid units
+START_RC = (3.5, 0.5)
+GOAL_RC  = (3.5, 10.5)
+
+
+def double_grid_resolution(grid: np.ndarray) -> np.ndarray:
+    """
+    Double the grid resolution by expanding each cell into a 2x2 block.
+    This allows for half-cell precision in path planning and obstacle inflation.
+    
+    Args:
+        grid: Original occupancy grid (H x W)
+    
+    Returns:
+        Doubled grid (2H x 2W) where each original cell becomes 2x2
+    """
+    H, W = grid.shape
+    doubled = np.zeros((2*H, 2*W), dtype=int)
+    
+    for r in range(H):
+        for c in range(W):
+            # Each cell (r,c) becomes a 2x2 block at (2r:2r+2, 2c:2c+2)
+            doubled[2*r:2*r+2, 2*c:2*c+2] = grid[r, c]
+    
+    return doubled
+
+
+def inflate_obstacles(grid: np.ndarray, inflation_cells: int = 1) -> np.ndarray:
+    """
+    Inflate obstacles by adding a safety margin around them.
+    This accounts for robot dimensions in path planning.
+    
+    Args:
+        grid: Binary occupancy grid (0=free, 1=occupied)
+        inflation_cells: Number of cells to inflate in all directions
+    
+    Returns:
+        Inflated grid with same shape
+    """
+    from scipy.ndimage import binary_dilation
+    
+    # Create structuring element for inflation
+    struct = np.ones((2*inflation_cells+1, 2*inflation_cells+1), dtype=int)
+    
+    # Dilate obstacles
+    inflated = binary_dilation(grid, structure=struct).astype(int)
+    
+    return inflated
 
 
 # =========================
@@ -272,112 +316,42 @@ def densify(points: List[Tuple[float,float]], step_m: float = 0.08) -> List[Tupl
 # =========================
 
 def build_tag_world_map() -> Dict[int, TagWorldPose]:
-    """
-    Tag placements from Figure 1.
-
-    Coordinate convention (TOP-LEFT ORIGIN):
-      - origin (0,0) at top-left of grid
-      - x increases right, y increases down
-      - cell (r,c) center: x = (c+0.5)*CELL, y = (r+0.5)*CELL
-      - yaw: 0=right, π/2=down, π=left, -π/2=up
+    """Build the AprilTag world map
+    
+    Tags are positioned on cube faces with 0.5 offset from cell centers.
+    Grid cell centers are at (row+0.5, col+0.5) * CELL_SIZE_M
     """
     m: Dict[int, TagWorldPose] = {}
-
-    # Fill like:
-    # m[30] = TagWorldPose(x=..., y=..., yaw=...)
     
-    HALF = 0.133  # CELL_SIZE_M / 2
+    # Helper function to convert grid position to world coordinates
+    def pos(row_offset: float, col_offset: float) -> Tuple[float, float]:
+        return (col_offset * CELL_SIZE_M, row_offset * CELL_SIZE_M)
+    
+    # Top horizontal bar - Tags on cells in row 1, 3, and 4, column 2
+    m[30] = TagWorldPose(*pos(1.5, 2.0), yaw=math.pi)      # Left face of (1,2)
+    m[31] = TagWorldPose(*pos(1.5, 3.0), yaw=0)            # Right face of (1,2)
+    m[32] = TagWorldPose(*pos(3.5, 2.0), yaw=math.pi)      # Left face of (3,2)
+    m[33] = TagWorldPose(*pos(3.5, 3.0), yaw=0)            # Right face of (3,2)
+    m[34] = TagWorldPose(*pos(5.0, 2.5), yaw=math.pi/2)    # Bottom face of (4,2)
 
-    # -----------------------
-    # Top horizontal bar (TOP of Figure 1)
-    # -----------------------
+    # Middle horizontal bars - row 0
+    m[35] = TagWorldPose(*pos(1.0, 4.5), yaw=math.pi/2)    # Bottom face of (0,4)
+    m[36] = TagWorldPose(*pos(1.0, 6.5), yaw=math.pi/2)    # Bottom face of (0,6)
 
-    # Tag 30
-    # Block at (r=1, c=2) → y = (1+0.5)*0.266 = 0.399
-    # Facing LEFT
-    m[30] = TagWorldPose(x=0.665 - HALF, y=0.399, yaw=math.pi)
+    # Center vertical stem - column 5
+    m[37] = TagWorldPose(*pos(4.0, 5.5), yaw=-math.pi/2)   # Top face of (4,5)
+    m[38] = TagWorldPose(*pos(5.5, 5.0), yaw=math.pi)      # Left face of (5,5)
+    m[39] = TagWorldPose(*pos(5.5, 6.0), yaw=0)            # Right face of (5,5)
+    m[40] = TagWorldPose(*pos(7.5, 5.0), yaw=math.pi)      # Left face of (7,5)
+    m[41] = TagWorldPose(*pos(7.5, 6.0), yaw=0)            # Right face of (7,5)
 
-    # Tag 31
-    # Block at (r=1, c=2)
-    # Facing RIGHT
-    m[31] = TagWorldPose(x=0.665 + HALF, y=0.399, yaw=0)
-
-    # Tag 32
-    # Block at (r=3, c=2) → y = (3+0.5)*0.266 = 0.931
-    # Facing LEFT
-    m[32] = TagWorldPose(x=0.665 - HALF, y=0.931, yaw=math.pi)
-
-    # Tag 33
-    # Block at (r=3, c=2)
-    # Facing RIGHT
-    m[33] = TagWorldPose(x=0.665 + HALF, y=0.931, yaw=0)
-
-    # Tag 34
-    # Block at (r=4, c=2) → y_center = 1.197, facing DOWN (π/2)
-    m[34] = TagWorldPose(x=0.665, y=1.197 + HALF, yaw=math.pi/2)
-
-
-    # -----------------------
-    # Middle horizontal bars
-    # -----------------------
-
-    # Tag 35
-    # Block at (r=0, c=4) → y = (0+0.5)*0.266 = 0.133, facing DOWN (π/2)
-    m[35] = TagWorldPose(x=1.197, y=0.133 + HALF, yaw=math.pi/2)
-
-    # Tag 36
-    # Block at (r=0, c=6) → y = 0.133, facing DOWN (π/2)
-    m[36] = TagWorldPose(x=1.729, y=0.133 + HALF, yaw=math.pi/2)
-
-
-    # -----------------------
-    # Center vertical stem (MIDDLE of Figure 1)
-    # -----------------------
-
-    # Tag 37
-    # Block at (r=4, c=5) → y = 1.197, facing UP (-π/2)
-    m[37] = TagWorldPose(x=1.463, y=1.197 - HALF, yaw=-math.pi/2)
-
-    # Tag 38
-    # Block at (r=5, c=5) → y = 1.463, facing LEFT
-    m[38] = TagWorldPose(x=1.463 - HALF, y=1.463, yaw=math.pi)
-
-    # Tag 39
-    # Block at (r=5, c=5) → facing RIGHT
-    m[39] = TagWorldPose(x=1.463 + HALF, y=1.463, yaw=0)
-
-    # Tag 40
-    # Block at (r=7, c=5) → y = 1.995, facing LEFT
-    m[40] = TagWorldPose(x=1.463 - HALF, y=1.995, yaw=math.pi)
-
-    # Tag 41
-    # Block at (r=7, c=5) → facing RIGHT
-    m[41] = TagWorldPose(x=1.463 + HALF, y=1.995, yaw=0)
-
-
-    # -----------------------
-    # Bottom vertical pillars (BOTTOM of Figure 1)
-    # -----------------------
-
-    # Tag 42
-    # Block at (r=1, c=8) → y = 0.399, facing LEFT
-    m[42] = TagWorldPose(x=2.261 - HALF, y=0.399, yaw=math.pi)
-
-    # Tag 43
-    # Block at (r=1, c=8) → facing RIGHT
-    m[43] = TagWorldPose(x=2.261 + HALF, y=0.399, yaw=0)
-
-    # Tag 44
-    # Block at (r=3, c=8) → y = 0.931, facing LEFT
-    m[44] = TagWorldPose(x=2.261 - HALF, y=0.931, yaw=math.pi)
-
-    # Tag 45
-    # Block at (r=3, c=8) → facing RIGHT
-    m[45] = TagWorldPose(x=2.261 + HALF, y=0.931, yaw=0)
-
-    # Tag 46
-    # Block at (r=4, c=8) → y = 1.197, facing DOWN (π/2)
-    m[46] = TagWorldPose(x=2.261, y=1.197 + HALF, yaw=math.pi/2)
+    # Bottom vertical pillars - column 8
+    m[42] = TagWorldPose(*pos(1.5, 8.0), yaw=math.pi)      # Left face of (1,8)
+    m[43] = TagWorldPose(*pos(1.5, 9.0), yaw=0)            # Right face of (1,8)
+    m[44] = TagWorldPose(*pos(3.5, 8.0), yaw=math.pi)      # Left face of (3,8)
+    m[45] = TagWorldPose(*pos(3.5, 9.0), yaw=0)            # Right face of (3,8)
+    m[46] = TagWorldPose(*pos(5.0, 8.5), yaw=math.pi/2)    # Bottom face of (4,8)
+    
     return m
 
 
@@ -658,25 +632,52 @@ def find_critical_tags(path_rc: List[Tuple[int,int]], tag_map: Dict[int, TagWorl
 def main():
     np.set_printoptions(precision=3, suppress=True, linewidth=140)
 
-    # Build grid and plan
-    grid = GridMap(OCC, cell_size_m=CELL_SIZE_M, origin_xy=(0.0, 0.0))
-    path_rc = astar(grid, START_RC, GOAL_RC)
-    if not path_rc:
+    # Double grid resolution for half-cell precision
+    print("\n=== Preparing Grid for Path Planning ===")
+    print(f"Original grid: {OCC.shape[0]} x {OCC.shape[1]} (cell size: {CELL_SIZE_M:.3f}m)")
+    
+    doubled_grid = double_grid_resolution(OCC)
+    doubled_cell_size = CELL_SIZE_M / 2.0  # Half the cell size
+    print(f"Doubled grid: {doubled_grid.shape[0]} x {doubled_grid.shape[1]} (cell size: {doubled_cell_size:.3f}m)")
+    
+    # Inflate by 1 cell in doubled grid (= 0.5 cell in original)
+    # Inflate obstacles - 1 cell provides 0.133m lateral clearance
+    # Robot: 1.5 boxes long × 1.0 box wide (half-width = 0.133m) ✓
+    inflated_grid = inflate_obstacles(doubled_grid, inflation_cells=1)
+    print(f"Inflated obstacles by 1 cell in doubled grid (0.133m = robot half-width) ✓")
+    print(f"Obstacles: {np.sum(doubled_grid)} -> {np.sum(inflated_grid)} cells")
+    print("============================================\n")
+    
+    # Convert start/goal to doubled coordinates
+    # Simply multiply by 2 since positions are stored as (row+0.5, col+0.5)
+    doubled_start = (int(START_RC[0] * 2), int(START_RC[1] * 2))
+    doubled_goal = (int(GOAL_RC[0] * 2), int(GOAL_RC[1] * 2))
+    
+    # Build grid and plan with doubled resolution
+    grid = GridMap(inflated_grid, cell_size_m=doubled_cell_size, origin_xy=(0.0, 0.0))
+    path_rc_doubled = astar(grid, doubled_start, doubled_goal)
+    
+    if not path_rc_doubled:
         print("No path found on the current occupancy grid.")
+        print("Try adjusting start/goal positions or reducing inflation.")
         return
     
-    # Debug: print the planned path
-    print(f"\n=== Planned Path (TOP-LEFT origin) ===")
-    print(f"Start: row={START_RC[0]}, col={START_RC[1]}")
-    print(f"Goal:  row={GOAL_RC[0]}, col={GOAL_RC[1]}")
-    print(f"Path has {len(path_rc)} waypoints:")
-    for i, (r, c) in enumerate(path_rc):
-        wx, wy = grid.grid_to_world_center(r, c)
-        print(f"  {i:2d}: (r={r}, c={c:2d}) -> world ({wx:.3f}, {wy:.3f})")
-    print(f"======================================\n")
+    # Convert doubled path back to original grid coordinates for display
+    # (divide by 2, but path execution uses world coordinates anyway)
+    path_rc = [(r//2, c//2) for r, c in path_rc_doubled]
     
-    # Convert to discrete segments
-    segments = path_to_segments(path_rc, CELL_SIZE_M)
+    # Debug: print the planned path using DOUBLED resolution for accurate world coords
+    print(f"\n=== Planned Path (TOP-LEFT origin, doubled resolution) ===")
+    print(f"Start: row={START_RC[0]}, col={START_RC[1]} (doubled: {doubled_start})")
+    print(f"Goal:  row={GOAL_RC[0]}, col={GOAL_RC[1]} (doubled: {doubled_goal})")
+    print(f"Path has {len(path_rc_doubled)} waypoints in doubled grid:")
+    for i, (r, c) in enumerate(path_rc_doubled[::2]):  # Show every other point to avoid clutter
+        wx, wy = grid.grid_to_world_center(r, c)
+        print(f"  {i*2:2d}: (r={r}, c={c:2d}) -> world ({wx:.3f}, {wy:.3f})")
+    print(f"===========================================================\n")
+    
+    # Convert to discrete segments using DOUBLED resolution for proper distances
+    segments = path_to_segments(path_rc_doubled, doubled_cell_size)
     print(f"\n=== Path Segments ===")
     for i, seg in enumerate(segments):
         if seg.cmd_type == "turn":
@@ -685,10 +686,14 @@ def main():
             print(f"  {i:2d}: MOVE {seg.value:.3f}m from {seg.start_rc} to {seg.end_rc}")
     print(f"=====================\n")
     
-    # Find critical tags at vertices
+    # Find critical tags at vertices using doubled resolution path
     tag_world_map = build_tag_world_map()
-    critical_tags = find_critical_tags(path_rc, tag_world_map, grid)
+    critical_tags = find_critical_tags(path_rc_doubled, tag_world_map, grid)
     print(f"\n=== Critical Tags at Vertices ===")
+    for waypoint_idx, tag_ids in critical_tags.items():
+        r, c = path_rc_doubled[waypoint_idx]
+        print(f"  Waypoint {waypoint_idx} (doubled r={r}, c={c}): Tags {tag_ids}")
+    print(f"=================================\n")
     for waypoint_idx, tag_ids in critical_tags.items():
         r, c = path_rc[waypoint_idx]
         print(f"  Waypoint {waypoint_idx} (r={r}, c={c}): Tags {tag_ids}")
@@ -708,6 +713,10 @@ def main():
     ep_camera.start_video_stream(display=False, resolution=rm_camera.STREAM_360P)
 
     detector = AprilTagDetector(K=K, family=TAG_FAMILY, threads=2, marker_size_m=TAG_SIZE_M)
+    
+    # Create OpenCV window
+    cv2.namedWindow("Robot Camera", cv2.WINDOW_NORMAL)
+    print("Camera window opened - press 'q' to quit")
 
     traveled: List[Tuple[float,float]] = []
     
@@ -720,6 +729,11 @@ def main():
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
             detections = detector.find_tags(gray)
             
+            # Draw detections on display image
+            display_img = img.copy()
+            draw_detections(display_img, detections)
+            cv2.imshow("Robot Camera", display_img)
+            
             if detections:
                 det = detections[0]
                 initial_pose = localizer.estimate_robot_pose(det)
@@ -728,6 +742,15 @@ def main():
             else:
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=20.0, timeout=1)
                 time.sleep(0.1)
+            
+            # Check for quit key
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                print("User quit during initialization")
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
+                ep_camera.stop_video_stream()
+                ep_robot.close()
+                cv2.destroyAllWindows()
+                return
         except Empty:
             time.sleep(0.001)
     
@@ -784,6 +807,14 @@ def main():
                             img = ep_camera.read_cv2_image(strategy="newest", timeout=0.1)
                             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
                             detections = detector.find_tags(gray)
+                            
+                            # Draw detections on display image
+                            display_img = img.copy()
+                            draw_detections(display_img, detections)
+                            cv2.putText(display_img, f"Looking for tags: {critical_tags[waypoint_idx]}", 
+                                      (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                            cv2.imshow("Robot Camera", display_img)
+                            cv2.waitKey(1)
                             
                             if detections:
                                 det = detections[0]
