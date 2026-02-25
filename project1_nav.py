@@ -310,7 +310,8 @@ def build_T_rc() -> np.ndarray:
     TODO: Camera pose in robot frame (T_rc).
     Start with identity, then measure offsets and update.
     """
-    return np.eye(4, dtype=float)
+    T = np.eye(4)
+    return T
 
 
 class Localizer:
