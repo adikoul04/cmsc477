@@ -569,8 +569,8 @@ def find_critical_tags(path_rc: List[Tuple[int,int]], tag_map: Dict[int, TagWorl
     """
     def world_to_grid_cell(wx: float, wy: float) -> Tuple[int, int]:
         """Convert world coordinates back to grid cell (row, col)"""
-        c = int((wx - grid.origin_x) / grid.cell)
-        r = int((wy - grid.origin_y) / grid.cell)
+        c = int((wx - grid.ox) / grid.cell)
+        r = int((wy - grid.oy) / grid.cell)
         return r, c
     
     critical_tags = {}
