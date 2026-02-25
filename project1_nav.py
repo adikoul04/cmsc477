@@ -43,6 +43,7 @@ from queue import Empty
 
 import pupil_apriltags
 from robomaster import robot, camera as rm_camera
+import robomaster
 
 
 # =========================
@@ -541,7 +542,9 @@ def main():
 
     # Robot setup
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="ap")
+    robomaster.config.ROBOT_IP_STR = "192.168.50.117"
+    # ep_robot.initialize(conn_type="ap")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100RC")
     ep_chassis = ep_robot.chassis
     ep_camera = ep_robot.camera
     ep_camera.start_video_stream(display=False, resolution=rm_camera.STREAM_360P)
