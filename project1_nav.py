@@ -58,22 +58,23 @@ TAG_FAMILY = "tag36h11"
 TAG_SIZE_M = 0.200     # 200 mm tags for THIS project
 CELL_SIZE_M = 0.266    # 26.6 cm storage cube grid
 
-# Occupancy from Figure 1 screenshot (r=0 bottom row, c=0 left column)
-OCC = np.array([[0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0], 
-                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0], 
-                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0], 
-                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0], 
-                [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0], 
-                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], 
-                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], 
-                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], 
-                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]], dtype=int)
+# Occupancy from Figure 1 screenshot (r=0 TOP row, c=0 left column)
+# Origin is TOP-LEFT to match numpy indexing
+# Row 0 is top, row 8 is bottom; Column 0 is left, column 10 is right
+OCC = np.array([[0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0],  # Row 0 (top)
+                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0],  # Row 1
+                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0],  # Row 2
+                [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0],  # Row 3
+                [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],  # Row 4 (middle)
+                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],  # Row 5
+                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],  # Row 6
+                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],  # Row 7
+                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]], dtype=int)  # Row 8 (bottom)
 
-OCC = np.flipud(OCC)
-
-# Start / goal cells from Figure 1 screenshot
-START_RC = (5, 0)
-GOAL_RC  = (5, 10)
+# Start / goal cells - using TOP-LEFT origin
+# Start is bottom-left area, Goal is bottom-right area
+START_RC = (3, 0)   
+GOAL_RC  = (3, 10)
 
 
 # =========================
@@ -204,9 +205,12 @@ class GridMap:
         return [(rr,cc) for rr,cc in cand if self.is_free(rr,cc)]
 
     def grid_to_world_center(self, r: int, c: int) -> Tuple[float, float]:
+        """Convert grid cell (r,c) to world (x,y) at cell center.
+        With TOP-LEFT origin: x increases right, y increases down.
+        """
         x = self.ox + (c + 0.5) * self.cell
         y = self.oy + (r + 0.5) * self.cell
-        return x, y
+        return (x, y)
 
 
 def astar(grid: GridMap, start_rc: Tuple[int,int], goal_rc: Tuple[int,int]) -> List[Tuple[int,int]]:
@@ -277,12 +281,13 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
       center stem: 37,38,39,40,41
       right pillar:42,43,44,45,46
 
-    Coordinate convention:
-      - origin (0,0) is bottom-left CORNER of the grid
+    Coordinate convention (TOP-LEFT ORIGIN):
+      - origin (0,0) is TOP-LEFT CORNER of the grid
+      - x increases right, y increases down
       - cell (r,c) center is:
           x = (c + 0.5)*CELL_SIZE_M
           y = (r + 0.5)*CELL_SIZE_M
-      - yaw: 0 faces +x (right), +pi/2 faces +y (up), pi faces -x (left), -pi/2 faces -y (down)
+      - yaw: 0 faces +x (right), +pi/2 faces +y (down), pi faces -x (left), -pi/2 faces -y (up)
     """
     m: Dict[int, TagWorldPose] = {}
 
@@ -292,108 +297,108 @@ def build_tag_world_map() -> Dict[int, TagWorldPose]:
     HALF = 0.133  # CELL_SIZE_M / 2
 
     # -----------------------
-    # Left vertical pillar
+    # Top horizontal bar (TOP of Figure 1)
     # -----------------------
 
     # Tag 30
-    # Block at (r=2, c=7)
+    # Block at (r=1, c=2)  [TOP-LEFT origin]
     # Facing LEFT → left face of square
-    m[30] = TagWorldPose(x=1.995 - HALF, y=0.665, yaw=math.pi)
+    m[30] = TagWorldPose(x=0.665 - HALF, y=0.399, yaw=math.pi)
 
     # Tag 31
-    # Block at (r=2, c=7)
+    # Block at (r=1, c=2)
     # Facing RIGHT → right face of square
-    m[31] = TagWorldPose(x=1.995 + HALF, y=0.665, yaw=0)
+    m[31] = TagWorldPose(x=0.665 + HALF, y=0.399, yaw=0)
 
     # Tag 32
-    # Block at (r=2, c=5)
+    # Block at (r=3, c=2)
     # Facing LEFT → left face
-    m[32] = TagWorldPose(x=1.463 - HALF, y=0.665, yaw=math.pi)
+    m[32] = TagWorldPose(x=0.665 - HALF, y=0.931, yaw=math.pi)
 
     # Tag 33
-    # Block at (r=2, c=5)
+    # Block at (r=3, c=2)
     # Facing RIGHT → right face
-    m[33] = TagWorldPose(x=1.463 + HALF, y=0.665, yaw=0)
+    m[33] = TagWorldPose(x=0.665 + HALF, y=0.931, yaw=0)
 
     # Tag 34
-    # Block at (r=2, c=4)
-    # Facing DOWN → bottom face
-    m[34] = TagWorldPose(x=1.197, y=0.665 - HALF, yaw=-math.pi/2)
+    # Block at (r=4, c=2)
+    # Facing DOWN → bottom face (in top-left coords, down is +y direction, so +pi/2)
+    m[34] = TagWorldPose(x=0.665, y=1.197 + HALF, yaw=math.pi/2)
 
 
     # -----------------------
-    # Top horizontal bar
+    # Middle horizontal bars
     # -----------------------
 
     # Tag 35
-    # Block at (r=4, c=8)
+    # Block at (r=0, c=4)
     # Facing DOWN → bottom face
-    m[35] = TagWorldPose(x=2.261, y=1.197 - HALF, yaw=-math.pi/2)
+    m[35] = TagWorldPose(x=1.197, y=0.133 + HALF, yaw=math.pi/2)
 
     # Tag 36
-    # Block at (r=6, c=8)
-    # Facing DOWN → bottom face
-    m[36] = TagWorldPose(x=2.261, y=1.729 - HALF, yaw=-math.pi/2)
+    # Block at (r=0, c=6)
+    # Facing UP → top face (in top-left coords, down is y direction, so pi/2)
+    m[36] = TagWorldPose(x=1.729, y=0.133 + HALF, yaw=math.pi/2)
 
 
     # -----------------------
-    # Center vertical stem
+    # Center vertical stem (MIDDLE of Figure 1)
     # -----------------------
 
     # Tag 37
-    # Block at (r=5, c=4)
+    # Block at (r=4, c=5)
     # Facing UP → top face
-    m[37] = TagWorldPose(x=1.197, y=1.463 + HALF, yaw=math.pi/2)
+    m[37] = TagWorldPose(x=1.463, y=1.197 - HALF, yaw=-math.pi/2)
 
     # Tag 38
-    # Block at (r=5, c=3)
+    # Block at (r=5, c=5)
     # Facing LEFT → left face
-    m[38] = TagWorldPose(x=0.931 - HALF, y=1.463, yaw=math.pi)
+    m[38] = TagWorldPose(x=1.463 - HALF, y=1.463, yaw=math.pi)
 
     # Tag 39
-    # Block at (r=5, c=3)
+    # Block at (r=5, c=5)
     # Facing RIGHT → right face
-    m[39] = TagWorldPose(x=0.931 + HALF, y=1.463, yaw=0)
+    m[39] = TagWorldPose(x=1.463 + HALF, y=1.463, yaw=0)
 
     # Tag 40
-    # Block at (r=5, c=1)
+    # Block at (r=7, c=5)
     # Facing LEFT → left face
-    m[40] = TagWorldPose(x=0.399 - HALF, y=1.463, yaw=math.pi)
+    m[40] = TagWorldPose(x=1.463 - HALF, y=1.995, yaw=math.pi)
 
     # Tag 41
-    # Block at (r=5, c=1)
+    # Block at (r=7, c=5)
     # Facing RIGHT → right face
-    m[41] = TagWorldPose(x=0.399 + HALF, y=1.463, yaw=0)
+    m[41] = TagWorldPose(x=1.463 + HALF, y=1.995, yaw=0)
 
 
     # -----------------------
-    # Right vertical pillar
+    # Bottom vertical pillars (BOTTOM of Figure 1)
     # -----------------------
 
     # Tag 42
-    # Block at (r=8, c=7)
+    # Block at (r=1, c=8)
     # Facing LEFT → left face
-    m[42] = TagWorldPose(x=1.995 - HALF, y=2.261, yaw=math.pi)
+    m[42] = TagWorldPose(x=2.261 - HALF, y=0.399, yaw=math.pi)
 
     # Tag 43
-    # Block at (r=8, c=7)
+    # Block at (r=1, c=8)
     # Facing RIGHT → right face
-    m[43] = TagWorldPose(x=1.995 + HALF, y=2.261, yaw=0)
+    m[43] = TagWorldPose(x=2.261 + HALF, y=0.399, yaw=0)
 
     # Tag 44
-    # Block at (r=8, c=5)
+    # Block at (r=3, c=8)
     # Facing LEFT → left face
-    m[44] = TagWorldPose(x=1.463 - HALF, y=2.261, yaw=math.pi)
+    m[44] = TagWorldPose(x=2.261 - HALF, y=0.931, yaw=math.pi)
 
     # Tag 45
-    # Block at (r=8, c=5)
+    # Block at (r=3, c=8)
     # Facing RIGHT → right face
-    m[45] = TagWorldPose(x=1.463 + HALF, y=2.261, yaw=0)
+    m[45] = TagWorldPose(x=2.261 + HALF, y=0.931, yaw=0)
 
     # Tag 46
-    # Block at (r=8, c=4)
+    # Block at (r=4, c=8)
     # Facing DOWN → bottom face
-    m[46] = TagWorldPose(x=1.197, y=2.261 - HALF, yaw=-math.pi/2)
+    m[46] = TagWorldPose(x=2.261, y=1.197 + HALF, yaw=math.pi/2)
     return m
 
 
@@ -522,6 +527,17 @@ def main():
     if not path_rc:
         print("No path found on the current occupancy grid.")
         return
+    
+    # Debug: print the planned path
+    print(f"\n=== Planned Path (TOP-LEFT origin) ===")
+    print(f"Start: row={START_RC[0]}, col={START_RC[1]}")
+    print(f"Goal:  row={GOAL_RC[0]}, col={GOAL_RC[1]}")
+    print(f"Path has {len(path_rc)} waypoints:")
+    for i, (r, c) in enumerate(path_rc):
+        wx, wy = grid.grid_to_world_center(r, c)
+        print(f"  {i:2d}: (r={r}, c={c:2d}) -> world ({wx:.3f}, {wy:.3f})")
+    print(f"======================================\n")
+    
     path_xy = densify([grid.grid_to_world_center(r,c) for (r,c) in path_rc], step_m=0.08)
 
     # AprilTag + localization
