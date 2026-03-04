@@ -38,6 +38,37 @@ Why this matters:
   - rotates in place to center the chosen tag in the image,
   - provides heading correction only.
 
+Detailed behavior of `center_tag_in_view(...)`:
+- Inputs:
+  - `ep_chassis`: robot chassis command interface.
+  - `ep_camera`: camera stream interface.
+  - `detector`: AprilTag detector.
+  - `target_ids`: allowed critical tag IDs for this waypoint.
+  - `timeout_s`: max correction time.
+  - `tol_px`: acceptable pixel error from image center.
+- Image-space target:
+  - Uses horizontal image center `cx_des` (for 360p this is near pixel `x=320`).
+  - Only horizontal alignment is corrected (yaw); no forward/backward distance correction is done.
+- Loop logic:
+  1. Read newest camera frame.
+  2. Detect tags in the frame.
+  3. Keep only detections whose `tag_id` is in `target_ids`.
+  4. Select the best candidate detection (highest detection quality/size).
+  5. Compute horizontal error: `err = detected_center_x - cx_des`.
+  6. If `|err| <= tol_px`, stop rotation and return success.
+  7. Otherwise command a small yaw rate proportional to error:
+     - `z_cmd = clamp(-k * err, -z_max, z_max)`.
+     - Tag left of center -> turn one way; tag right of center -> turn the other way.
+  8. Repeat until centered or timeout.
+- Fallback behavior:
+  - If no target tag is visible in a loop iteration, apply a slow search spin to reacquire.
+  - On timeout, stop yaw motion and return failure.
+
+Why this is enough for this project design:
+- The map provides known move distances from grid geometry.
+- `center_tag_in_view` is used specifically to reduce heading drift at turns.
+- Distance is intentionally not corrected from tag pose in this navigation mode.
+
 Note:
 - The script keeps localization utilities in the file, but runtime navigation now
   uses tags for orientation correction rather than continuous position tracking.
