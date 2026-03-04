@@ -81,7 +81,7 @@ START_CELL = (3, 0)
 GOAL_CELL = (3, 10)
 START_ALIGNMENT_TAGS = [32]
 # Enter manual tag sequence here (in order). Example: [32, 38, 44]
-MANUAL_ALIGNMENT_TAGS: List[int] = [32, 35, 36, 39, 46, 45]
+MANUAL_ALIGNMENT_TAGS: List[int] = [32, 35, 36, 39, 45]
 
 # Controller settings
 V_MAX = 0.22
@@ -89,7 +89,7 @@ W_MAX_DEG = 65.0
 K_RHO = 0.9
 K_ALPHA = 2.2
 WAYPOINT_TOL_M = 0.08
-MOVE_SPEED_MPS = 0.20
+MOVE_SPEED_MPS = 0.25
 STRAFE_SIGN = 1.0  # flip to -1.0 if lateral direction is inverted on your robot
 
 
