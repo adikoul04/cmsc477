@@ -58,7 +58,7 @@ TAG_SIZE_M = 0.200
 CELL_SIZE_M = 0.266
 PLANNING_SCALE = 10         # 10x subcell grid
 INFLATION_SUBCELLS = 9      # 0.9 block barrier at 10x scale
-CENTER_YAW_SIGN = 1.0       # flip to -1.0 if centering turns the wrong way
+CENTER_YAW_SIGN = -1.0      # robot-specific yaw sign convention
 
 # Top-left origin occupancy map (0=free, 1=obstacle)
 OCC = np.array(
@@ -308,14 +308,20 @@ def draw_detections(img: np.ndarray, detections) -> None:
     if cv2 is None:
         return
     for det in detections:
-        corners = det.corners.astype(int)
-        for i in range(4):
-            p0 = tuple(corners[i])
-            p1 = tuple(corners[(i + 1) % 4])
-            cv2.line(img, p0, p1, (0, 255, 0), 2)
+        # Mirror examples_en/apriltag.py style for high-visibility overlays.
+        pts = det.corners.reshape((-1, 1, 2)).astype(np.int32)
+        cv2.polylines(img, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
+
+        top_left = tuple(pts[0][0])
+        top_right = tuple(pts[1][0])
+        bottom_right = tuple(pts[2][0])
+        bottom_left = tuple(pts[3][0])
+        cv2.line(img, top_left, bottom_right, color=(0, 0, 255), thickness=2)
+        cv2.line(img, top_right, bottom_left, color=(0, 0, 255), thickness=2)
+
         c = det.center.astype(int)
-        cv2.circle(img, tuple(c), 4, (0, 0, 255), -1)
-        cv2.putText(img, str(det.tag_id), (c[0] + 6, c[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+        cv2.circle(img, tuple(c), 4, (0, 255, 255), -1)
+        cv2.putText(img, str(det.tag_id), (c[0] + 6, c[1] - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
 
 def build_tag_world_map() -> Dict[int, TagWorldPose]:
@@ -694,7 +700,7 @@ def main() -> None:
     ep_robot.initialize(conn_type="sta", sn="3JKCH8800100RC")
     ep_chassis = ep_robot.chassis
     ep_camera = ep_robot.camera
-    ep_camera.start_video_stream(display=True, resolution=rm_camera.STREAM_360P)
+    ep_camera.start_video_stream(display=False, resolution=rm_camera.STREAM_360P)
     detector = AprilTagDetector(K)
 
     cv2.namedWindow("Robot Camera", cv2.WINDOW_NORMAL)
