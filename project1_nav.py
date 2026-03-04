@@ -655,6 +655,8 @@ def center_tag_in_view(
     target_ids: List[int],
     timeout_s: Optional[float] = None,
     tol_px: float = 22.0,
+    enable_backup_recovery: bool = False,
+    backup_speed_mps: float = 0.06,
 ) -> bool:
     """
     Rotate in place to center target tag in camera frame.
@@ -669,6 +671,8 @@ def center_tag_in_view(
     missed = 0
     filt_err: Optional[float] = None
     last_err: Optional[float] = None
+    backup_time_s = 0.0
+    step_dt = 0.1
 
     while True:
         if timeout_s is not None and (time.time() - t0) > timeout_s:
@@ -687,15 +691,22 @@ def center_tag_in_view(
 
         if det is None:
             missed += 1
-            # Avoid large one-direction runaway when detections flicker.
-            if missed <= 3:
-                z_cmd = 0.0
+            if enable_backup_recovery:
+                # If too close to tag, back up straight until tag is visible again.
+                ep_chassis.drive_speed(x=-backup_speed_mps, y=0.0, z=0.0, timeout=step_dt)
+                backup_time_s += step_dt
+                z_cmd_txt = "backup"
             else:
-                if last_err is None:
-                    z_cmd = 4.0
+                # Avoid large one-direction runaway when detections flicker.
+                if missed <= 3:
+                    z_cmd = 0.0
                 else:
-                    z_cmd = 4.0 if last_err < 0 else -4.0
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=0.1)
+                    if last_err is None:
+                        z_cmd = 4.0
+                    else:
+                        z_cmd = 4.0 if last_err < 0 else -4.0
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=step_dt)
+                z_cmd_txt = f"search z={z_cmd:+.1f}"
             cv2.putText(
                 display,
                 f"Centering tags {sorted(target_set)}: target not visible",
@@ -705,6 +716,17 @@ def center_tag_in_view(
                 (0, 0, 255),
                 2,
             )
+            if enable_backup_recovery:
+                backup_dist = backup_time_s * backup_speed_mps
+                cv2.putText(
+                    display,
+                    f"{z_cmd_txt}  d_back={backup_dist:.3f}m",
+                    (10, 48),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (0, 255, 255),
+                    2,
+                )
             cv2.imshow("Robot Camera", display)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
@@ -742,6 +764,15 @@ def center_tag_in_view(
             )
             cv2.imshow("Robot Camera", display)
             cv2.waitKey(1)
+
+            # If we backed up during this alignment, recover by moving forward
+            # the same amount before returning.
+            if enable_backup_recovery and backup_time_s > 1e-6:
+                backup_dist = backup_time_s * backup_speed_mps
+                print(f"  recovery: move forward {backup_dist:.3f}m after manual align")
+                ep_chassis.drive_speed(x=backup_speed_mps, y=0.0, z=0.0, timeout=backup_time_s)
+                time.sleep(backup_time_s)
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
             return True
 
         # Conservative yaw rate to reduce overshoot.
@@ -866,6 +897,7 @@ def main() -> None:
     turn_speed_deg = 30.0
     move_speed_mps = MOVE_SPEED_MPS
     completed = False
+    startup_tag_set = set(START_ALIGNMENT_TAGS)
 
     def execute_turn(delta_yaw_rad: float, label: str) -> None:
         delta_deg = math.degrees(wrap_to_pi(delta_yaw_rad))
@@ -896,12 +928,18 @@ def main() -> None:
                         print(f"Waypoint {i} manual tag {tag_id}: already facing tag, no pre-turn.")
 
                     print(f"Waypoint {i}: centering manual tag {tag_id}")
+                    backup_ok = tag_id not in startup_tag_set
+                    if backup_ok:
+                        print(f"  manual tag {tag_id}: backup recovery enabled if tag not visible")
+                    else:
+                        print(f"  manual tag {tag_id}: startup tag, rotate-only search (no backup)")
                     center_tag_in_view(
                         ep_chassis,
                         ep_camera,
                         detector,
                         [tag_id],
                         timeout_s=None,
+                        enable_backup_recovery=backup_ok,
                     )
                     # After centering, robot is assumed to face opposite tag yaw.
                     expected_yaw = facing_yaw

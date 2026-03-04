@@ -17,19 +17,19 @@ ACTION: MANUAL_ALIGN tag=32
 ACTION: MOVE_TRANSLATE 0.133 m | robot-frame dir=forward (x_cmd=+0.250, y_cmd=+0.000)
 
 [SEGMENT 1] from (35, 10) to (59, 10)
-ACTION: MOVE_TRANSLATE 0.638 m | robot-frame dir=right (x_cmd=+0.000, y_cmd=+0.250)
+ACTION: MOVE_TRANSLATE 0.638 m | robot-frame dir=left (x_cmd=+0.000, y_cmd=+0.250)
 
 [SEGMENT 2] from (59, 10) to (59, 39)
 ACTION: MOVE_TRANSLATE 0.771 m | robot-frame dir=forward (x_cmd=+0.250, y_cmd=+0.000)
 
 [SEGMENT 3] from (59, 39) to (35, 39)
-ACTION: MOVE_TRANSLATE 0.638 m | robot-frame dir=left (x_cmd=+0.000, y_cmd=-0.250)
+ACTION: MOVE_TRANSLATE 0.638 m | robot-frame dir=right (x_cmd=+0.000, y_cmd=-0.250)
 
 [SEGMENT 4] from (35, 39) to (35, 40)
 ACTION: MOVE_TRANSLATE 0.027 m | robot-frame dir=forward (x_cmd=+0.250, y_cmd=+0.000)
 
 [SEGMENT 5] from (35, 40) to (30, 40)
-ACTION: MOVE_TRANSLATE 0.133 m | robot-frame dir=left (x_cmd=+0.000, y_cmd=-0.250)
+ACTION: MOVE_TRANSLATE 0.133 m | robot-frame dir=right (x_cmd=+0.000, y_cmd=-0.250)
 
 [SEGMENT 6] from (30, 40) to (30, 45)
 ACTION: MOVE_TRANSLATE 0.133 m | robot-frame dir=forward (x_cmd=+0.250, y_cmd=+0.000)
@@ -37,12 +37,12 @@ ACTION: MOVE_TRANSLATE 0.133 m | robot-frame dir=forward (x_cmd=+0.250, y_cmd=+0
 [SEGMENT 7] from (30, 45) to (30, 65)
 ACTION: TURN pre-align for tag 35: -90.0 deg
 ACTION: MANUAL_ALIGN tag=35
-ACTION: MOVE_TRANSLATE 0.532 m | robot-frame dir=right (x_cmd=+0.000, y_cmd=+0.250)
+ACTION: MOVE_TRANSLATE 0.532 m | robot-frame dir=left (x_cmd=+0.000, y_cmd=+0.250)
 
 [SEGMENT 8] from (30, 65) to (30, 70)
 ACTION: TURN pre-align for tag 36: skipped (already facing tag)
 ACTION: MANUAL_ALIGN tag=36
-ACTION: MOVE_TRANSLATE 0.133 m | robot-frame dir=right (x_cmd=+0.000, y_cmd=+0.250)
+ACTION: MOVE_TRANSLATE 0.133 m | robot-frame dir=left (x_cmd=+0.000, y_cmd=+0.250)
 
 [SEGMENT 9] from (30, 70) to (55, 70)
 ACTION: MOVE_TRANSLATE 0.665 m | robot-frame dir=backward (x_cmd=-0.250, y_cmd=+0.000)
@@ -50,13 +50,13 @@ ACTION: MOVE_TRANSLATE 0.665 m | robot-frame dir=backward (x_cmd=-0.250, y_cmd=+
 [SEGMENT 10] from (55, 70) to (59, 70)
 ACTION: TURN pre-align for tag 39: -90.0 deg
 ACTION: MANUAL_ALIGN tag=39
-ACTION: MOVE_TRANSLATE 0.106 m | robot-frame dir=left (x_cmd=+0.000, y_cmd=-0.250)
+ACTION: MOVE_TRANSLATE 0.106 m | robot-frame dir=right (x_cmd=+0.000, y_cmd=-0.250)
 
 [SEGMENT 11] from (59, 70) to (59, 99)
 ACTION: MOVE_TRANSLATE 0.771 m | robot-frame dir=backward (x_cmd=-0.250, y_cmd=-0.000)
 
 [SEGMENT 12] from (59, 99) to (35, 99)
-ACTION: MOVE_TRANSLATE 0.638 m | robot-frame dir=right (x_cmd=-0.000, y_cmd=+0.250)
+ACTION: MOVE_TRANSLATE 0.638 m | robot-frame dir=left (x_cmd=-0.000, y_cmd=+0.250)
 
 [SEGMENT 13] from (35, 99) to (35, 105)
 ACTION: TURN pre-align for tag 45: skipped (already facing tag)

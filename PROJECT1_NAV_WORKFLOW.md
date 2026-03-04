@@ -62,6 +62,7 @@ Detailed behavior of `center_tag_in_view(...)`:
   8. Repeat until centered or timeout.
 - Fallback behavior:
   - If no target tag is visible in a loop iteration, apply a slow search spin to reacquire.
+  - For non-start manual tags, runtime can enable a backup-recovery mode: back up slowly until the tag is detected, then after centering, move forward the same backed-up amount.
   - On timeout, stop yaw motion and return failure.
 
 Why this is enough for this project design:
@@ -111,8 +112,10 @@ This design intentionally avoids using tag-estimated position for distance contr
 6. Initialize RoboMaster and video stream.
 7. Perform startup alignment by centering Tag 32 (known start-facing tag).
    - after this step, runtime assumes heading is opposite Tag 32 yaw.
+   - startup tag reacquire is rotation-only (no backup motion).
 8. Execute segments:
    - apply manual tag alignments at injected waypoints,
+   - for non-start manual tags, if tag is too close and not visible, back up-until-seen then recover forward the same amount,
    - timed turn to outgoing segment heading,
    - timed forward move for known segment distance.
 9. Stop robot, close camera, cleanup.

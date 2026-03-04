@@ -49,9 +49,11 @@ def relative_direction_label(x_cmd: float, y_cmd: float) -> str:
     if ax >= 2.0 * ay:
         return "forward" if x_cmd > 0 else "backward"
     if ay >= 2.0 * ax:
-        return "right" if y_cmd > 0 else "left"
+        # RoboMaster lateral sign convention on this robot setup:
+        # +y command moves left, -y command moves right.
+        return "left" if y_cmd > 0 else "right"
     fwd = "forward" if x_cmd > 0 else "backward"
-    lat = "right" if y_cmd > 0 else "left"
+    lat = "left" if y_cmd > 0 else "right"
     return f"{fwd}-{lat}"
 
 
