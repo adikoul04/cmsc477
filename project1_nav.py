@@ -836,8 +836,13 @@ def main() -> None:
         print("Startup alignment timed out; proceeding with current heading.")
 
     # Open-loop execution by known segment distances.
-    # Assumes initial robot heading is +x (to the right on map).
-    expected_yaw = 0.0
+    # After startup alignment, assume robot faces the tag, i.e., opposite tag yaw.
+    # This ensures no redundant pre-turn at first manual tag if it is 32.
+    expected_yaw = (
+        wrap_to_pi(tag_world_map[START_ALIGNMENT_TAGS[0]].yaw + math.pi)
+        if START_ALIGNMENT_TAGS
+        else 0.0
+    )
     turn_speed_deg = 30.0
     move_speed_mps = 0.15
     completed = False
@@ -869,11 +874,17 @@ def main() -> None:
             if i in manual_wp_tags:
                 for tag_id in manual_wp_tags[i]:
                     tag_yaw = tag_world_map[tag_id].yaw
+                    facing_yaw = wrap_to_pi(tag_yaw + math.pi)  # robot sees tag when opposite tag yaw
                     path_heading_at_wp = expected_yaw
 
-                    # Turn to face tag orientation, align, then turn back to path heading.
-                    execute_turn(tag_yaw - expected_yaw, label=f"Waypoint {i} manual tag {tag_id}")
-                    expected_yaw = tag_yaw
+                    # If already facing the tag, skip pre-turn.
+                    pre_turn = wrap_to_pi(facing_yaw - expected_yaw)
+                    if abs(math.degrees(pre_turn)) > 1.0:
+                        execute_turn(pre_turn, label=f"Waypoint {i} manual tag {tag_id} pre-turn")
+                        expected_yaw = facing_yaw
+                    else:
+                        print(f"Waypoint {i} manual tag {tag_id}: already facing tag, no pre-turn.")
+
                     print(f"Waypoint {i}: centering manual tag {tag_id}")
                     center_tag_in_view(
                         ep_chassis,

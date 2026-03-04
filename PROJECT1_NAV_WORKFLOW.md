@@ -92,7 +92,8 @@ Runtime execution is segment-based:
 1. Plan a simplified waypoint path (corner points).
 2. For each segment:
    - if current waypoint is a manual alignment waypoint:
-     - turn to the tag's yaw if needed (90°/180° supported),
+     - if already facing opposite the tag yaw (robot_yaw = tag_yaw + pi): skip pre-turn,
+     - otherwise turn to that facing direction (90°/180° supported),
      - center that manual tag in view,
      - turn back to path heading,
    - compute desired heading from segment direction and perform timed turn,
@@ -109,6 +110,7 @@ This design intentionally avoids using tag-estimated position for distance contr
 5. Build tag map and manual alignment plan.
 6. Initialize RoboMaster and video stream.
 7. Perform startup alignment by centering Tag 32 (known start-facing tag).
+   - after this step, runtime assumes heading is opposite Tag 32 yaw.
 8. Execute segments:
    - apply manual tag alignments at injected waypoints,
    - timed turn to outgoing segment heading,
