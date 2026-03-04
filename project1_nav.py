@@ -600,7 +600,7 @@ def main() -> None:
     ep_robot.initialize(conn_type="sta", sn="3JKCH8800100RC")
     ep_chassis = ep_robot.chassis
     ep_camera = ep_robot.camera
-    ep_camera.start_video_stream(display=False, resolution=rm_camera.STREAM_360P)
+    ep_camera.start_video_stream(display=True, resolution=rm_camera.STREAM_360P)
     detector = AprilTagDetector(K)
 
     cv2.namedWindow("Robot Camera", cv2.WINDOW_NORMAL)
