@@ -528,7 +528,7 @@ def center_tag_in_view(
     detector: AprilTagDetector,
     target_ids: List[int],
     timeout_s: Optional[float] = None,
-    tol_px: float = 10.0,
+    tol_px: float = 22.0,
 ) -> bool:
     """
     Rotate in place to center target tag in camera frame.
@@ -548,7 +548,7 @@ def center_tag_in_view(
         if timeout_s is not None and (time.time() - t0) > timeout_s:
             break
         try:
-            img = ep_camera.read_cv2_image(strategy="newest", timeout=0.2)
+            img = ep_camera.read_cv2_image(strategy="newest", timeout=0.08)
         except Empty:
             continue
 
@@ -569,7 +569,7 @@ def center_tag_in_view(
                     z_cmd = 4.0
                 else:
                     z_cmd = 4.0 if last_err < 0 else -4.0
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=0.2)
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=0.1)
             cv2.putText(
                 display,
                 f"Centering tags {sorted(target_set)}: target not visible",
@@ -581,7 +581,7 @@ def center_tag_in_view(
             )
             cv2.imshow("Robot Camera", display)
             if cv2.waitKey(1) & 0xFF == ord("q"):
-                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
                 return False
             continue
 
@@ -590,7 +590,7 @@ def center_tag_in_view(
         if filt_err is None:
             filt_err = err
         else:
-            filt_err = 0.65 * filt_err + 0.35 * err
+            filt_err = 0.45 * filt_err + 0.55 * err
 
         cv2.circle(display, (int(det.center[0]), int(det.center[1])), 5, (255, 255, 0), -1)
         cv2.putText(
@@ -604,7 +604,7 @@ def center_tag_in_view(
         )
 
         if abs(filt_err) <= tol_px:
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
             cv2.putText(
                 display,
                 "Centered",
@@ -624,7 +624,7 @@ def center_tag_in_view(
         z_cmd = CENTER_YAW_SIGN * (z_mag if filt_err < 0 else -z_mag)
         if last_err is not None and (filt_err * last_err < 0) and abs(filt_err) < 40:
             z_cmd *= 0.5
-        ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=0.2)
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=0.1)
         last_err = filt_err
 
         cv2.putText(
@@ -638,10 +638,10 @@ def center_tag_in_view(
         )
         cv2.imshow("Robot Camera", display)
         if cv2.waitKey(1) & 0xFF == ord("q"):
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
             return False
 
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
     return False
 
 
@@ -714,7 +714,7 @@ def main() -> None:
         detector,
         START_ALIGNMENT_TAGS,
         timeout_s=None,
-        tol_px=20.0,
+        tol_px=28.0,
     )
     if aligned:
         print("Startup alignment complete.")
