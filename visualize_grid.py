@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Visualize the exact path and critical turn points used by project1_nav.py.
+Visualize the exact path and manual alignment waypoints used by project1_nav.py.
 
 This script imports planning logic from project1_nav so the plotted path matches
 what the robot follows at runtime.
@@ -18,16 +18,19 @@ from project1_nav import (
     CELL_SIZE_M,
     GOAL_CELL,
     INFLATION_SUBCELLS,
+    MANUAL_ALIGNMENT_TAGS,
     OCC,
     PLANNING_SCALE,
     START_CELL,
     GridMap,
     astar,
+    build_execution_path_with_manual_nodes,
     build_tag_world_map,
     double_grid_resolution,
     doubled_node_to_world,
-    find_critical_tags,
+    find_manual_alignment_plan,
     inflate_obstacles,
+    manual_waypoint_map,
     remove_collinear,
 )
 
@@ -55,13 +58,16 @@ def compute_runtime_plan() -> tuple[
     if not path_full:
         raise RuntimeError("No path found on inflated grid")
 
-    path_follow = remove_collinear(path_full)
-    path_xy = [doubled_node_to_world(r, c, doubled_cell) for (r, c) in path_follow]
+    path_base = remove_collinear(path_full)
 
     tag_map = build_tag_world_map()
-    critical_tags = find_critical_tags(path_follow, tag_map, grid)
+    manual_plan = find_manual_alignment_plan(path_full, MANUAL_ALIGNMENT_TAGS, tag_map, grid)
+    manual_nodes = [node for _, node, _ in manual_plan]
+    path_follow = build_execution_path_with_manual_nodes(path_full, path_base, manual_nodes)
+    manual_wp_tags = manual_waypoint_map(path_follow, manual_plan)
+    path_xy = [doubled_node_to_world(r, c, doubled_cell) for (r, c) in path_follow]
 
-    return doubled_occ, inflated, grid, path_full, path_follow, path_xy, critical_tags
+    return doubled_occ, inflated, grid, path_full, path_follow, path_xy, manual_wp_tags
 
 
 def draw_grid(ax, occ: np.ndarray, cell_size: float, color_free="white", alpha=0.25):
@@ -86,7 +92,7 @@ def draw_grid(ax, occ: np.ndarray, cell_size: float, color_free="white", alpha=0
 
 
 def visualize_grid_and_path() -> None:
-    doubled_occ, inflated, grid, path_full, path_follow, path_xy, critical_tags = compute_runtime_plan()
+    doubled_occ, inflated, grid, path_full, path_follow, path_xy, manual_wp_tags = compute_runtime_plan()
     tag_map = build_tag_world_map()
 
     rows, cols = OCC.shape
@@ -175,14 +181,14 @@ def visualize_grid_and_path() -> None:
     ax.plot(sx, sy, marker="s", markersize=15, color="green", markeredgecolor="black", markeredgewidth=2, label="Start", zorder=9)
     ax.plot(gx, gy, marker="*", markersize=20, color="gold", markeredgecolor="black", markeredgewidth=1.5, label="Goal", zorder=9)
 
-    # Mark critical turn points
-    for idx, ids in sorted(critical_tags.items()):
+    # Mark manual alignment waypoints
+    for idx, ids in sorted(manual_wp_tags.items()):
         x, y = path_xy[idx]
         ax.plot(x, y, marker="X", markersize=12, color="purple", markeredgecolor="black", markeredgewidth=1.2, zorder=10)
         ax.text(
             x + 0.03,
             y - 0.03,
-            f"wp{idx}: {ids}",
+            f"manual wp{idx}: {ids}",
             fontsize=8,
             color="purple",
             bbox=dict(boxstyle="round,pad=0.2", facecolor="lavender", alpha=0.85),
@@ -205,7 +211,7 @@ def visualize_grid_and_path() -> None:
     info.append(f"Inflation: {INFLATION_SUBCELLS} subcells ({INFLATION_SUBCELLS/PLANNING_SCALE:.2f} block = {INFLATION_SUBCELLS*doubled_cell:.3f}m)")
     info.append(f"A* full path points: {len(path_full)}")
     info.append(f"Robot follow waypoints: {len(path_follow)}")
-    info.append(f"Critical turn points: {len(critical_tags)}")
+    info.append(f"Manual alignment waypoints: {len(manual_wp_tags)}")
 
     ax.text(
         0.02,
@@ -227,13 +233,13 @@ def visualize_grid_and_path() -> None:
     print(f"Goal subcell:  {path_follow[-1]}, world: ({gx:.3f}, {gy:.3f})")
     print(f"A* full points: {len(path_full)}")
     print(f"Robot follow waypoints: {len(path_follow)}")
-    if critical_tags:
-        print("Critical waypoints:")
-        for i, ids in sorted(critical_tags.items()):
+    if manual_wp_tags:
+        print("Manual alignment waypoints:")
+        for i, ids in sorted(manual_wp_tags.items()):
             x, y = path_xy[i]
             print(f"  wp {i:2d} at ({x:.3f}, {y:.3f}) -> tags {ids}")
     else:
-        print("Critical waypoints: none")
+        print("Manual alignment waypoints: none")
 
 
 if __name__ == "__main__":

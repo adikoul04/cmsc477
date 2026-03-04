@@ -1,12 +1,12 @@
 # Project1 Nav: Components and Workflow
 
-This document explains how `project1_nav.py` works, what parts are critical, and the execution flow.
+This document explains how `project1_nav.py` works, key components, and the execution flow.
 
 ## Purpose
 `project1_nav.py` solves Project 1 end-to-end:
 1. Plans a shortest path on a known occupancy map.
 2. Uses known block geometry to execute segment distances open-loop.
-3. Uses AprilTags at critical turn waypoints to correct heading by image centering.
+3. Uses user-defined manual tag sequence to insert alignment waypoints on the path.
 4. Repeats turn-then-move segments until the goal is reached.
 
 ## Coordinate System and Map
@@ -34,7 +34,7 @@ Why this matters:
 - `build_tag_world_map()`: known map of tag id -> `(x, y, yaw)` in world frame.
 - `AprilTagDetector`: wrapper over `pupil_apriltags` detection + pose estimation.
 - `center_tag_in_view(...)`:
-  - detects target critical tag IDs,
+  - detects target manual-alignment tag IDs,
   - rotates in place to center the chosen tag in the image,
   - provides heading correction only.
 
@@ -43,7 +43,7 @@ Detailed behavior of `center_tag_in_view(...)`:
   - `ep_chassis`: robot chassis command interface.
   - `ep_camera`: camera stream interface.
   - `detector`: AprilTag detector.
-  - `target_ids`: allowed critical tag IDs for this waypoint.
+  - `target_ids`: allowed tag IDs for this alignment step.
   - `timeout_s`: max correction time.
   - `tol_px`: acceptable pixel error from image center.
 - Image-space target:
@@ -78,23 +78,23 @@ Note:
 - In this setup, this is intentional because camera and robot center are assumed aligned in `x/y` (difference is mainly `z`).
 
 ### 5) Critical turn tags
-- `find_critical_tags(path_rc, tag_map, grid)` identifies tags that are:
-  - aligned with robot heading at turn waypoints,
-  - in front of robot,
-  - within a reasonable distance range,
-  - facing toward the robot,
-  - and visible by a line-of-sight check against map obstacles.
-
-- `center_tag_in_view(...)` rotates robot in place so one of these tags is near the image center.
-
-Why this matters:
-- Reduces heading drift at corners, improving tracking stability.
+### 5) Manual alignment waypoints
+- Configure `MANUAL_ALIGNMENT_TAGS` in `project1_nav.py` as an ordered list of tag IDs.
+- For each tag in this list, `find_manual_alignment_plan(...)` finds the first point on the full path where:
+  - if tag faces up/down: robot is vertically aligned (same subcell column),
+  - if tag faces left/right: robot is horizontally aligned (same subcell row),
+  - and line-of-sight is clear (not blocked by walls).
+- These points are injected into the simplified execution path with
+  `build_execution_path_with_manual_nodes(...)`.
 
 ### 6) Open-loop distance + heading correction
 Runtime execution is segment-based:
 1. Plan a simplified waypoint path (corner points).
 2. For each segment:
-   - if current waypoint is critical, center a critical tag to correct heading,
+   - if current waypoint is a manual alignment waypoint:
+     - turn to the tag's yaw if needed (90°/180° supported),
+     - center that manual tag in view,
+     - turn back to path heading,
    - compute desired heading from segment direction and perform timed turn,
    - compute segment distance from map geometry and perform timed forward move.
 3. Continue to next segment until goal.
@@ -106,11 +106,11 @@ This design intentionally avoids using tag-estimated position for distance contr
 2. Convert start/goal to scaled-grid node indices (`10*r+5, 10*c+5`) and plan on that lattice.
 3. Run A*.
 4. Simplify path to corner waypoints.
-5. Build tag map and critical-tag map.
+5. Build tag map and manual alignment plan.
 6. Initialize RoboMaster and video stream.
 7. Perform startup alignment by centering Tag 32 (known start-facing tag).
 8. Execute segments:
-   - re-center using critical tags at turn waypoints,
+   - apply manual tag alignments at injected waypoints,
    - timed turn to outgoing segment heading,
    - timed forward move for known segment distance.
 9. Stop robot, close camera, cleanup.
@@ -124,6 +124,6 @@ This design intentionally avoids using tag-estimated position for distance contr
   - timeout.
 
 ## Outputs and Diagnostics
-- Console prints planned waypoint list, critical waypoints, and each segment turn/move command.
+- Console prints planned waypoint list, manual alignment waypoints, and each segment turn/move command.
 - OpenCV window is used during tag-centering and as a stop window (`q` to stop).
-- `visualize_grid.py` now reproduces runtime planning path and marks critical turn points with tag IDs.
+- `visualize_grid.py` now reproduces runtime planning path and marks manual alignment waypoints with tag IDs.

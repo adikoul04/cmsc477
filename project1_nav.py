@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Project 1: AprilTag-based localization + path planning + closed-loop navigation.
+Project 1: AprilTag-based navigation with open-loop distance and manual tag alignment.
 
 Design choices aligned to project requirements:
 - Known map and known AprilTag world poses.
 - A* shortest path planning on occupancy grid.
 - Obstacle inflation for robot footprint (robot is 1.5 cubes long, 1.0 cube wide).
-- Continuous velocity control using pose estimated from AprilTags.
-- At turn waypoints, use critical tags (aligned with robot heading) to re-center orientation.
+- Open-loop distance execution from known map geometry.
+- Manual tag-alignment waypoints inserted into the path.
 
 Coordinate convention:
 - Top-left origin for grid indexing.
@@ -80,6 +80,8 @@ OCC = np.array(
 START_CELL = (3, 0)
 GOAL_CELL = (3, 10)
 START_ALIGNMENT_TAGS = [32]
+# Enter manual tag sequence here (in order). Example: [32, 38, 44]
+MANUAL_ALIGNMENT_TAGS: List[int] = [32, 44, 36, 46, 45]
 
 # Controller settings
 V_MAX = 0.22
@@ -508,6 +510,110 @@ def find_critical_tags(
     return out
 
 
+def world_to_subcell(wx: float, wy: float, grid: GridMap) -> Tuple[int, int]:
+    c = int(round((wx - grid.ox) / grid.cell))
+    r = int(round((wy - grid.oy) / grid.cell))
+    return r, c
+
+
+def line_of_sight_clear_world(rx: float, ry: float, tx: float, ty: float) -> bool:
+    """Visibility check against OCC walls in world coordinates."""
+    dist = math.hypot(tx - rx, ty - ry)
+    if dist < 1e-6:
+        return True
+    steps = max(2, int(dist / (CELL_SIZE_M / 8.0)))
+    for k in range(1, steps):
+        a = k / steps
+        if a > 0.92:
+            break  # ignore very near-tag segment
+        x = rx + a * (tx - rx)
+        y = ry + a * (ty - ry)
+        cc = int(x / CELL_SIZE_M)
+        rr = int(y / CELL_SIZE_M)
+        if 0 <= rr < OCC.shape[0] and 0 <= cc < OCC.shape[1] and OCC[rr, cc] == 1:
+            return False
+    return True
+
+
+def find_manual_alignment_plan(
+    path_full_rc: List[Tuple[int, int]],
+    manual_tags: List[int],
+    tag_map: Dict[int, TagWorldPose],
+    grid: GridMap,
+) -> List[Tuple[int, Tuple[int, int], int]]:
+    """
+    For each manual tag (in sequence), find the first path point that:
+    - is aligned with the tag axis requirement (depends on tag facing),
+    - has clear line-of-sight to the tag (not blocked by walls).
+
+    Returns list of tuples: (full_path_index, node_rc, tag_id)
+    """
+    plan: List[Tuple[int, Tuple[int, int], int]] = []
+    search_start = 0
+
+    for tag_id in manual_tags:
+        if tag_id not in tag_map:
+            print(f"[manual] Tag {tag_id} not in world map, skipping.")
+            continue
+
+        tag = tag_map[tag_id]
+        tr, tc = world_to_subcell(tag.x, tag.y, grid)
+        # up/down-facing tag => vertical alignment (same column)
+        # left/right-facing tag => horizontal alignment (same row)
+        vertical_facing = abs(math.sin(tag.yaw)) > abs(math.cos(tag.yaw))
+
+        found = None
+        for idx in range(search_start, len(path_full_rc)):
+            r, c = path_full_rc[idx]
+            aligned = (c == tc) if vertical_facing else (r == tr)
+            if not aligned:
+                continue
+            rx, ry = doubled_node_to_world(r, c, grid.cell)
+            if not line_of_sight_clear_world(rx, ry, tag.x, tag.y):
+                continue
+            found = (idx, (r, c), tag_id)
+            break
+
+        if found is None:
+            print(f"[manual] No valid alignment point found for tag {tag_id}.")
+            continue
+
+        plan.append(found)
+        search_start = found[0] + 1
+
+    return plan
+
+
+def build_execution_path_with_manual_nodes(
+    path_full_rc: List[Tuple[int, int]],
+    path_base_rc: List[Tuple[int, int]],
+    manual_nodes: List[Tuple[int, int]],
+) -> List[Tuple[int, int]]:
+    """
+    Inject manual nodes into the simplified path while preserving full-path order.
+    """
+    keep = set(path_base_rc) | set(manual_nodes)
+    out: List[Tuple[int, int]] = []
+    for rc in path_full_rc:
+        if rc in keep and (not out or out[-1] != rc):
+            out.append(rc)
+    return out
+
+
+def manual_waypoint_map(
+    exec_path_rc: List[Tuple[int, int]],
+    manual_plan: List[Tuple[int, Tuple[int, int], int]],
+) -> Dict[int, List[int]]:
+    """Map execution waypoint index -> manual tags to align there."""
+    out: Dict[int, List[int]] = {}
+    for _, node_rc, tag_id in manual_plan:
+        for i, rc in enumerate(exec_path_rc):
+            if rc == node_rc:
+                out.setdefault(i, []).append(tag_id)
+                break
+    return out
+
+
 def choose_detection(detections, valid_ids: Optional[set] = None):
     cand = []
     for d in detections:
@@ -672,27 +778,35 @@ def main() -> None:
     goal_d = (PLANNING_SCALE * GOAL_CELL[0] + center_offset, PLANNING_SCALE * GOAL_CELL[1] + center_offset)
 
     grid = GridMap(inflated, cell_size_m=doubled_cell, origin_xy=(0.0, 0.0))
-    path_rc = astar(grid, start_d, goal_d)
-    if not path_rc:
+    path_full_rc = astar(grid, start_d, goal_d)
+    if not path_full_rc:
         print("No path found.")
         return
 
-    path_rc = remove_collinear(path_rc)
+    path_base_rc = remove_collinear(path_full_rc)
+    tag_world_map = build_tag_world_map()
+
+    manual_plan = find_manual_alignment_plan(
+        path_full_rc,
+        MANUAL_ALIGNMENT_TAGS,
+        tag_world_map,
+        grid,
+    )
+    manual_nodes = [node for _, node, _ in manual_plan]
+    path_rc = build_execution_path_with_manual_nodes(path_full_rc, path_base_rc, manual_nodes)
+    manual_wp_tags = manual_waypoint_map(path_rc, manual_plan)
     path_xy = [doubled_node_to_world(r, c, doubled_cell) for (r, c) in path_rc]
 
     print(f"Path waypoints: {len(path_xy)}")
     for i, (r, c) in enumerate(path_rc):
         x, y = path_xy[i]
         print(f"  {i:2d}: rc=({r:2d},{c:2d}) -> ({x:.3f}, {y:.3f})")
-
-    tag_world_map = build_tag_world_map()
-    critical_tags = find_critical_tags(path_rc, tag_world_map, grid)
-    print("Critical tags at turn waypoints:")
-    if not critical_tags:
+    print("Manual alignment waypoints:")
+    if not manual_wp_tags:
         print("  none")
     else:
-        for idx, ids in critical_tags.items():
-            print(f"  wp {idx}: {ids}")
+        for idx, ids in manual_wp_tags.items():
+            print(f"  wp {idx}: tags {ids}")
 
     print("\n=== Robot Init ===")
     ep_robot = robot.Robot()
@@ -728,6 +842,18 @@ def main() -> None:
     move_speed_mps = 0.15
     completed = False
 
+    def execute_turn(delta_yaw_rad: float, label: str) -> None:
+        delta_deg = math.degrees(wrap_to_pi(delta_yaw_rad))
+        if abs(delta_deg) <= 1.0:
+            return
+        z_cmd = turn_speed_deg if delta_deg > 0 else -turn_speed_deg
+        t_turn = abs(delta_deg) / turn_speed_deg
+        print(f"{label}: turn {delta_deg:.1f} deg")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=3)
+        time.sleep(t_turn)
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
+        time.sleep(0.2)
+
     def desired_yaw_from_step(dr: int, dc: int) -> float:
         if dc > 0:
             return 0.0
@@ -739,16 +865,25 @@ def main() -> None:
 
     try:
         for i in range(len(path_rc) - 1):
-            # If this waypoint is a turn point, correct heading by centering critical tag.
-            if i in critical_tags:
-                print(f"Waypoint {i}: centering critical tags {critical_tags[i]}")
-                center_tag_in_view(
-                    ep_chassis,
-                    ep_camera,
-                    detector,
-                    critical_tags[i],
-                    timeout_s=None,
-                )
+            # Manual alignment at configured waypoints.
+            if i in manual_wp_tags:
+                for tag_id in manual_wp_tags[i]:
+                    tag_yaw = tag_world_map[tag_id].yaw
+                    path_heading_at_wp = expected_yaw
+
+                    # Turn to face tag orientation, align, then turn back to path heading.
+                    execute_turn(tag_yaw - expected_yaw, label=f"Waypoint {i} manual tag {tag_id}")
+                    expected_yaw = tag_yaw
+                    print(f"Waypoint {i}: centering manual tag {tag_id}")
+                    center_tag_in_view(
+                        ep_chassis,
+                        ep_camera,
+                        detector,
+                        [tag_id],
+                        timeout_s=None,
+                    )
+                    execute_turn(path_heading_at_wp - expected_yaw, label=f"Waypoint {i} return-to-path")
+                    expected_yaw = path_heading_at_wp
 
             r0, c0 = path_rc[i]
             r1, c1 = path_rc[i + 1]
@@ -756,16 +891,7 @@ def main() -> None:
             desired_yaw = desired_yaw_from_step(dr, dc)
 
             # Turn to desired heading (open-loop timing).
-            turn_rad = wrap_to_pi(desired_yaw - expected_yaw)
-            turn_deg = math.degrees(turn_rad)
-            if abs(turn_deg) > 1.0:
-                z_cmd = turn_speed_deg if turn_deg > 0 else -turn_speed_deg
-                t_turn = abs(turn_deg) / turn_speed_deg
-                print(f"Segment {i}: turn {turn_deg:.1f} deg")
-                ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=3)
-                time.sleep(t_turn)
-                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
-                time.sleep(0.2)
+            execute_turn(desired_yaw - expected_yaw, label=f"Segment {i}")
             expected_yaw = desired_yaw
 
             # Move exact known segment distance from map geometry.
