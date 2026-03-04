@@ -58,6 +58,7 @@ TAG_SIZE_M = 0.200
 CELL_SIZE_M = 0.266
 PLANNING_SCALE = 10         # 10x subcell grid
 INFLATION_SUBCELLS = 9      # 0.9 block barrier at 10x scale
+TOP_RIGHT_RIGHT_INFLATION_SUBCELLS = 11  # local override: 1.1 blocks on right side
 CENTER_YAW_SIGN = -1.0      # robot-specific yaw sign convention
 
 # Top-left origin occupancy map (0=free, 1=obstacle)
@@ -160,6 +161,37 @@ def inflate_obstacles(grid: np.ndarray, inflation_cells: int) -> np.ndarray:
         c0 = max(0, c - inflation_cells)
         c1 = min(W, c + inflation_cells + 1)
         out[r0:r1, c0:c1] = 1
+    out = apply_top_right_guardrail_override(out, inflation_cells)
+    return out
+
+
+def apply_top_right_guardrail_override(inflated: np.ndarray, base_inflation_cells: int) -> np.ndarray:
+    """
+    Keep 0.9-block inflation globally, but increase right-side guardrail to 1.1
+    near the top-right vertical obstacle bar at original cells (rows 0..4, col 8).
+    """
+    target_right = TOP_RIGHT_RIGHT_INFLATION_SUBCELLS
+    if target_right <= base_inflation_cells:
+        return inflated
+
+    out = inflated.copy()
+    H, W = out.shape
+    extra_right = target_right - base_inflation_cells
+    scale = PLANNING_SCALE
+
+    # Hardcoded region from the known map: vertical bar at col 8, rows 0..4.
+    for rr in range(0, 5):
+        cc = 8
+        r_block0 = rr * scale
+        r_block1 = r_block0 + (scale - 1)
+        c_block1 = cc * scale + (scale - 1)
+
+        r0 = max(0, r_block0 - base_inflation_cells)
+        r1 = min(H, r_block1 + base_inflation_cells + 1)
+        c0 = max(0, c_block1 + base_inflation_cells + 1)
+        c1 = min(W, c_block1 + target_right + 1)
+        if c1 > c0:
+            out[r0:r1, c0:c1] = 1
     return out
 
 

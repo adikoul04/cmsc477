@@ -19,10 +19,12 @@ This document explains how `project1_nav.py` works, key components, and the exec
 ### 1) Grid preparation and safety inflation
 - `double_grid_resolution(grid, scale=10)` expands each cell into a 10x10 subcell block.
 - `inflate_obstacles(grid, inflation_cells=9)` inflates obstacles by 9 subcells.
+- Hardcoded local override: for the top-right vertical bar (original col `8`, rows `0..4`), the guardrail on its **right side** is extended to `1.1` blocks (`11` subcells).
 
 Why this matters:
 - Robot footprint is approximately `1.5 x 1.0` cubes.
 - Inflating by 9 subcells at 10x scale gives a `0.9 block` barrier (`0.2394 m`) around obstacles.
+- The top-right vertical bar has extra right-side margin to avoid boundary grazing in that corridor.
 
 ### 2) Path planner
 - `GridMap`: occupancy access, bounds checks, and grid->world conversion.

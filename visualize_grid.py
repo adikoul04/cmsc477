@@ -209,6 +209,7 @@ def visualize_grid_and_path() -> None:
     info.append(f"Original grid: {rows}x{cols}, cell={CELL_SIZE_M:.3f}m")
     info.append(f"Scaled grid: {doubled_occ.shape[0]}x{doubled_occ.shape[1]} ({PLANNING_SCALE}x), cell={doubled_cell:.3f}m")
     info.append(f"Inflation: {INFLATION_SUBCELLS} subcells ({INFLATION_SUBCELLS/PLANNING_SCALE:.2f} block = {INFLATION_SUBCELLS*doubled_cell:.3f}m)")
+    info.append("Local override: top-right vertical bar uses 1.1-block right-side guardrail")
     info.append(f"A* full path points: {len(path_full)}")
     info.append(f"Robot follow waypoints: {len(path_follow)}")
     info.append(f"Manual alignment waypoints: {len(manual_wp_tags)}")
