@@ -90,7 +90,7 @@ K_RHO = 0.9
 K_ALPHA = 2.2
 WAYPOINT_TOL_M = 0.08
 MOVE_SPEED_MPS = 0.20
-STRAFE_SIGN = -1.0  # flip to -1.0 if lateral direction is inverted on your robot
+STRAFE_SIGN = 1.0  # flip to -1.0 if lateral direction is inverted on your robot
 
 
 # =========================

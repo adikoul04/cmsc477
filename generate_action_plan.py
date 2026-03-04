@@ -49,9 +49,9 @@ def relative_direction_label(x_cmd: float, y_cmd: float) -> str:
     if ax >= 2.0 * ay:
         return "forward" if x_cmd > 0 else "backward"
     if ay >= 2.0 * ax:
-        return "left" if y_cmd > 0 else "right"
+        return "right" if y_cmd > 0 else "left"
     fwd = "forward" if x_cmd > 0 else "backward"
-    lat = "left" if y_cmd > 0 else "right"
+    lat = "right" if y_cmd > 0 else "left"
     return f"{fwd}-{lat}"
 
 
