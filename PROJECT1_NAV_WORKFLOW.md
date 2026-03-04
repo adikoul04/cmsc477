@@ -115,6 +115,7 @@ This design intentionally avoids using tag-estimated position for distance contr
 7. Perform startup alignment by centering Tag 32 (known start-facing tag).
    - after this step, runtime assumes heading is opposite Tag 32 yaw.
    - startup tag reacquire is rotation-only (no backup motion).
+   - startup reacquire uses a higher search spin rate (`START_SEARCH_SPIN_DEG_S`) to find Tag 32 faster from random initial orientation.
 8. Execute segments:
    - apply manual tag alignments at injected waypoints,
    - for non-start manual tags, if tag is too close and not visible, back up-until-seen then recover forward the same amount,

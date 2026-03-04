@@ -94,6 +94,7 @@ MOVE_SPEED_MPS = 0.30
 STRAFE_SIGN = 1.0  # flip to -1.0 if lateral direction is inverted on your robot
 MANUAL_BACKUP_SPEED_MPS = 0.06
 MANUAL_BACKUP_STEP_S = 0.06
+START_SEARCH_SPIN_DEG_S = 10.0
 
 
 # =========================
@@ -692,6 +693,7 @@ def center_tag_in_view(
     enable_backup_recovery: bool = False,
     backup_speed_mps: float = 0.06,
     backup_step_s: float = 0.08,
+    search_spin_deg_s: float = 4.0,
 ) -> bool:
     """
     Rotate in place to center target tag in camera frame.
@@ -739,9 +741,9 @@ def center_tag_in_view(
                     z_cmd = 0.0
                 else:
                     if last_err is None:
-                        z_cmd = 4.0
+                        z_cmd = search_spin_deg_s
                     else:
-                        z_cmd = 4.0 if last_err < 0 else -4.0
+                        z_cmd = search_spin_deg_s if last_err < 0 else -search_spin_deg_s
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=step_dt)
                 z_cmd_txt = f"search z={z_cmd:+.1f}"
             cv2.putText(
@@ -919,6 +921,7 @@ def main() -> None:
         START_ALIGNMENT_TAGS,
         timeout_s=None,
         tol_px=28.0,
+        search_spin_deg_s=START_SEARCH_SPIN_DEG_S,
     )
     if aligned:
         print("Startup alignment complete.")
