@@ -56,8 +56,8 @@ K = np.array(
 TAG_FAMILY = "tag36h11"
 TAG_SIZE_M = 0.200
 CELL_SIZE_M = 0.266
-PLANNING_SCALE = 4          # 4x subcell grid
-INFLATION_SUBCELLS = 3      # 3/4 block barrier at 4x scale
+PLANNING_SCALE = 10         # 10x subcell grid
+INFLATION_SUBCELLS = 9      # 0.9 block barrier at 10x scale
 
 # Top-left origin occupancy map (0=free, 1=obstacle)
 OCC = np.array(
@@ -571,7 +571,7 @@ def main() -> None:
     doubled_occ = double_grid_resolution(OCC, scale=PLANNING_SCALE)
     doubled_cell = CELL_SIZE_M / float(PLANNING_SCALE)
 
-    # 4x scale + inflation by 3 subcells => 0.75 block barrier (0.1995 m).
+    # 10x scale + inflation by 9 subcells => 0.9 block barrier (0.2394 m).
     inflated = inflate_obstacles(doubled_occ, inflation_cells=INFLATION_SUBCELLS)
 
     # Place start/goal on subcell lattice at original cell centers.

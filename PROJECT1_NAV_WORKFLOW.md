@@ -17,12 +17,12 @@ This document explains how `project1_nav.py` works, what parts are critical, and
 ## Critical Components
 
 ### 1) Grid preparation and safety inflation
-- `double_grid_resolution(grid, scale=4)` expands each cell into a 4x4 subcell block.
-- `inflate_obstacles(grid, inflation_cells=3)` inflates obstacles by 3 subcells.
+- `double_grid_resolution(grid, scale=10)` expands each cell into a 10x10 subcell block.
+- `inflate_obstacles(grid, inflation_cells=9)` inflates obstacles by 9 subcells.
 
 Why this matters:
 - Robot footprint is approximately `1.5 x 1.0` cubes.
-- Inflating by 3 subcells at 4x scale gives a `0.75 block` barrier (`0.1995 m`) around obstacles.
+- Inflating by 9 subcells at 10x scale gives a `0.9 block` barrier (`0.2394 m`) around obstacles.
 
 ### 2) Path planner
 - `GridMap`: occupancy access, bounds checks, and grid->world conversion.
@@ -102,8 +102,8 @@ Runtime execution is segment-based:
 This design intentionally avoids using tag-estimated position for distance control.
 
 ## Runtime Workflow (High-Level)
-1. Build 4x scaled and inflated grid.
-2. Convert start/goal to scaled-grid node indices (`4*r+2, 4*c+2`) and plan on that lattice.
+1. Build 10x scaled and inflated grid.
+2. Convert start/goal to scaled-grid node indices (`10*r+5, 10*c+5`) and plan on that lattice.
 3. Run A*.
 4. Simplify path to corner waypoints.
 5. Build tag map and critical-tag map.
