@@ -58,6 +58,7 @@ TAG_SIZE_M = 0.200
 CELL_SIZE_M = 0.266
 PLANNING_SCALE = 10         # 10x subcell grid
 INFLATION_SUBCELLS = 9      # 0.9 block barrier at 10x scale
+CENTER_YAW_SIGN = 1.0       # flip to -1.0 if centering turns the wrong way
 
 # Top-left origin occupancy map (0=free, 1=obstacle)
 OCC = np.array(
@@ -520,15 +521,26 @@ def center_tag_in_view(
     ep_camera,
     detector: AprilTagDetector,
     target_ids: List[int],
-    timeout_s: float = 3.0,
+    timeout_s: Optional[float] = None,
     tol_px: float = 10.0,
 ) -> bool:
-    """Rotate in place to center target tag in camera frame."""
+    """
+    Rotate in place to center target tag in camera frame.
+
+    Intended behavior:
+    - tag left of center -> slow counterclockwise rotation
+    - tag right of center -> slow clockwise rotation
+    """
     t0 = time.time()
     target_set = set(target_ids)
     cx_des = 320.0
+    missed = 0
+    filt_err: Optional[float] = None
+    last_err: Optional[float] = None
 
-    while time.time() - t0 < timeout_s:
+    while True:
+        if timeout_s is not None and (time.time() - t0) > timeout_s:
+            break
         try:
             img = ep_camera.read_cv2_image(strategy="newest", timeout=0.2)
         except Empty:
@@ -536,21 +548,94 @@ def center_tag_in_view(
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
         detections = detector.find_tags(gray)
+        display = img.copy()
+        draw_detections(display, detections)
+        cv2.line(display, (int(cx_des), 0), (int(cx_des), display.shape[0] - 1), (0, 255, 255), 1)
         det = choose_detection(detections, valid_ids=target_set)
 
         if det is None:
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=12.0, timeout=1)
+            missed += 1
+            # Avoid large one-direction runaway when detections flicker.
+            if missed <= 3:
+                z_cmd = 0.0
+            else:
+                if last_err is None:
+                    z_cmd = 4.0
+                else:
+                    z_cmd = 4.0 if last_err < 0 else -4.0
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=0.2)
+            cv2.putText(
+                display,
+                f"Centering tags {sorted(target_set)}: target not visible",
+                (10, 24),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 0, 255),
+                2,
+            )
+            cv2.imshow("Robot Camera", display)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+                return False
             continue
 
+        missed = 0
         err = float(det.center[0] - cx_des)
-        if abs(err) <= tol_px:
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
+        if filt_err is None:
+            filt_err = err
+        else:
+            filt_err = 0.65 * filt_err + 0.35 * err
+
+        cv2.circle(display, (int(det.center[0]), int(det.center[1])), 5, (255, 255, 0), -1)
+        cv2.putText(
+            display,
+            f"Centering tags {sorted(target_set)} | err={filt_err:+.1f}px",
+            (10, 24),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 255, 255),
+            2,
+        )
+
+        if abs(filt_err) <= tol_px:
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+            cv2.putText(
+                display,
+                "Centered",
+                (10, 48),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+            )
+            cv2.imshow("Robot Camera", display)
+            cv2.waitKey(1)
             return True
 
-        z_cmd = clamp(-0.10 * err, -25.0, 25.0)
-        ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=1)
+        # Conservative yaw rate to reduce overshoot.
+        z_mag = clamp(0.05 * abs(filt_err), 3.0, 10.0)
+        # Left (negative error) -> counterclockwise (+z)
+        z_cmd = CENTER_YAW_SIGN * (z_mag if filt_err < 0 else -z_mag)
+        if last_err is not None and (filt_err * last_err < 0) and abs(filt_err) < 40:
+            z_cmd *= 0.5
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=z_cmd, timeout=0.2)
+        last_err = filt_err
 
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
+        cv2.putText(
+            display,
+            f"z_cmd={z_cmd:+.1f} deg/s",
+            (10, 48),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 255, 255),
+            2,
+        )
+        cv2.imshow("Robot Camera", display)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+            return False
+
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
     return False
 
 
@@ -622,7 +707,7 @@ def main() -> None:
         ep_camera,
         detector,
         START_ALIGNMENT_TAGS,
-        timeout_s=3.0,
+        timeout_s=None,
         tol_px=20.0,
     )
     if aligned:
@@ -651,7 +736,13 @@ def main() -> None:
             # If this waypoint is a turn point, correct heading by centering critical tag.
             if i in critical_tags:
                 print(f"Waypoint {i}: centering critical tags {critical_tags[i]}")
-                center_tag_in_view(ep_chassis, ep_camera, detector, critical_tags[i])
+                center_tag_in_view(
+                    ep_chassis,
+                    ep_camera,
+                    detector,
+                    critical_tags[i],
+                    timeout_s=None,
+                )
 
             r0, c0 = path_rc[i]
             r1, c1 = path_rc[i + 1]
@@ -685,7 +776,20 @@ def main() -> None:
             # Allow user stop after each segment.
             try:
                 img = ep_camera.read_cv2_image(strategy="newest", timeout=0.2)
-                cv2.imshow("Robot Camera", img)
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.uint8)
+                detections = detector.find_tags(gray)
+                display = img.copy()
+                draw_detections(display, detections)
+                cv2.putText(
+                    display,
+                    f"Segment {i} complete",
+                    (10, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (0, 255, 255),
+                    2,
+                )
+                cv2.imshow("Robot Camera", display)
             except Exception:
                 pass
             if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -714,7 +818,7 @@ def main() -> None:
             pass
         ep_robot.close()
         cv2.destroyAllWindows()
-        print(f"Traveled pose samples: {len(traveled)}")
+        print("Run complete.")
 
 
 if __name__ == "__main__":
