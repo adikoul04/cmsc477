@@ -91,6 +91,9 @@ K_ALPHA = 2.2
 WAYPOINT_TOL_M = 0.08
 MOVE_SPEED_MPS = 0.25
 STRAFE_SIGN = 1.0  # flip to -1.0 if lateral direction is inverted on your robot
+MANUAL_BACKUP_SPEED_MPS = 0.06
+MANUAL_RECOVERY_SPEED_MPS = 0.05
+MANUAL_RECOVERY_DISTANCE_SCALE = 0.85
 
 
 # =========================
@@ -657,6 +660,8 @@ def center_tag_in_view(
     tol_px: float = 22.0,
     enable_backup_recovery: bool = False,
     backup_speed_mps: float = 0.06,
+    recovery_speed_mps: Optional[float] = None,
+    recovery_distance_scale: float = 1.0,
 ) -> bool:
     """
     Rotate in place to center target tag in camera frame.
@@ -672,6 +677,8 @@ def center_tag_in_view(
     filt_err: Optional[float] = None
     last_err: Optional[float] = None
     backup_time_s = 0.0
+    if recovery_speed_mps is None:
+        recovery_speed_mps = backup_speed_mps
     step_dt = 0.1
 
     while True:
@@ -769,9 +776,14 @@ def center_tag_in_view(
             # the same amount before returning.
             if enable_backup_recovery and backup_time_s > 1e-6:
                 backup_dist = backup_time_s * backup_speed_mps
-                print(f"  recovery: move forward {backup_dist:.3f}m after manual align")
-                ep_chassis.drive_speed(x=backup_speed_mps, y=0.0, z=0.0, timeout=backup_time_s)
-                time.sleep(backup_time_s)
+                recovery_dist = max(0.0, backup_dist * recovery_distance_scale)
+                recovery_time_s = recovery_dist / max(recovery_speed_mps, 1e-6)
+                print(
+                    f"  recovery: back={backup_dist:.3f}m, "
+                    f"forward={recovery_dist:.3f}m (scale={recovery_distance_scale:.2f})"
+                )
+                ep_chassis.drive_speed(x=recovery_speed_mps, y=0.0, z=0.0, timeout=recovery_time_s)
+                time.sleep(recovery_time_s)
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
             return True
 
@@ -940,6 +952,9 @@ def main() -> None:
                         [tag_id],
                         timeout_s=None,
                         enable_backup_recovery=backup_ok,
+                        backup_speed_mps=MANUAL_BACKUP_SPEED_MPS,
+                        recovery_speed_mps=MANUAL_RECOVERY_SPEED_MPS,
+                        recovery_distance_scale=MANUAL_RECOVERY_DISTANCE_SCALE,
                     )
                     # After centering, robot is assumed to face opposite tag yaw.
                     expected_yaw = facing_yaw
