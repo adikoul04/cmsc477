@@ -92,6 +92,7 @@ WAYPOINT_TOL_M = 0.08
 MOVE_SPEED_MPS = 0.25
 STRAFE_SIGN = 1.0  # flip to -1.0 if lateral direction is inverted on your robot
 MANUAL_BACKUP_SPEED_MPS = 0.06
+MANUAL_BACKUP_STEP_S = 0.06
 
 
 # =========================
@@ -658,6 +659,7 @@ def center_tag_in_view(
     tol_px: float = 22.0,
     enable_backup_recovery: bool = False,
     backup_speed_mps: float = 0.06,
+    backup_step_s: float = 0.08,
 ) -> bool:
     """
     Rotate in place to center target tag in camera frame.
@@ -672,7 +674,7 @@ def center_tag_in_view(
     missed = 0
     filt_err: Optional[float] = None
     last_err: Optional[float] = None
-    backup_time_s = 0.0
+    backup_steps = 0
     step_dt = 0.1
 
     while True:
@@ -694,8 +696,10 @@ def center_tag_in_view(
             missed += 1
             if enable_backup_recovery:
                 # If too close to tag, back up straight until tag is visible again.
-                ep_chassis.drive_speed(x=-backup_speed_mps, y=0.0, z=0.0, timeout=step_dt)
-                backup_time_s += step_dt
+                ep_chassis.drive_speed(x=-backup_speed_mps, y=0.0, z=0.0, timeout=backup_step_s)
+                time.sleep(backup_step_s)
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.05)
+                backup_steps += 1
                 z_cmd_txt = "backup"
             else:
                 # Avoid large one-direction runaway when detections flicker.
@@ -718,10 +722,10 @@ def center_tag_in_view(
                 2,
             )
             if enable_backup_recovery:
-                backup_dist = backup_time_s * backup_speed_mps
+                backup_dist = backup_steps * backup_step_s * backup_speed_mps
                 cv2.putText(
                     display,
-                    f"{z_cmd_txt}  d_back={backup_dist:.3f}m",
+                    f"{z_cmd_txt}  steps={backup_steps} d_back={backup_dist:.3f}m",
                     (10, 48),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.55,
@@ -767,12 +771,14 @@ def center_tag_in_view(
             cv2.waitKey(1)
 
             # If we backed up during this alignment, recover by moving forward
-            # with the exact same commanded speed and commanded time.
-            if enable_backup_recovery and backup_time_s > 1e-6:
-                backup_dist = backup_time_s * backup_speed_mps
-                print(f"  recovery: forward for same command as backup ({backup_dist:.3f}m nominal)")
-                ep_chassis.drive_speed(x=backup_speed_mps, y=0.0, z=0.0, timeout=backup_time_s)
-                time.sleep(backup_time_s)
+            # by replaying the same number of fixed forward increments.
+            if enable_backup_recovery and backup_steps > 0:
+                backup_dist = backup_steps * backup_step_s * backup_speed_mps
+                print(f"  recovery: replay {backup_steps} forward steps ({backup_dist:.3f}m nominal)")
+                for _ in range(backup_steps):
+                    ep_chassis.drive_speed(x=backup_speed_mps, y=0.0, z=0.0, timeout=backup_step_s)
+                    time.sleep(backup_step_s)
+                    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.05)
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
             return True
 
@@ -942,6 +948,7 @@ def main() -> None:
                         timeout_s=None,
                         enable_backup_recovery=backup_ok,
                         backup_speed_mps=MANUAL_BACKUP_SPEED_MPS,
+                        backup_step_s=MANUAL_BACKUP_STEP_S,
                     )
                     # After centering, robot is assumed to face opposite tag yaw.
                     expected_yaw = facing_yaw

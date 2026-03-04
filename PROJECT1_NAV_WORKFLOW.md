@@ -62,7 +62,7 @@ Detailed behavior of `center_tag_in_view(...)`:
   8. Repeat until centered or timeout.
 - Fallback behavior:
   - If no target tag is visible in a loop iteration, apply a slow search spin to reacquire.
-  - For non-start manual tags, runtime can enable a backup-recovery mode: back up slowly until the tag is detected, then after centering, move forward using the exact same commanded speed and commanded time used during backup.
+  - For non-start manual tags, runtime can enable a backup-recovery mode: back up in fixed small increments until the tag is detected, then after centering, move forward the same number of fixed increments.
   - On timeout, stop yaw motion and return failure.
 
 Why this is enough for this project design:
@@ -128,7 +128,8 @@ This design intentionally avoids using tag-estimated position for distance contr
   - yaw command gain and clamp,
   - timeout.
 - Manual backup/recovery:
-  - `MANUAL_BACKUP_SPEED_MPS` (used for both backup and forward recovery so commanded motion is symmetric).
+  - `MANUAL_BACKUP_SPEED_MPS` (used for both backup and forward recovery),
+  - `MANUAL_BACKUP_STEP_S` (fixed increment duration, replayed symmetrically in reverse and forward).
 
 ## Outputs and Diagnostics
 - Console prints planned waypoint list, manual alignment waypoints, and each segment turn/move command.
