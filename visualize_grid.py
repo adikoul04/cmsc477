@@ -17,7 +17,9 @@ from matplotlib.patches import FancyArrow
 from project1_nav import (
     CELL_SIZE_M,
     GOAL_CELL,
+    INFLATION_SUBCELLS,
     OCC,
+    PLANNING_SCALE,
     START_CELL,
     GridMap,
     astar,
@@ -40,12 +42,13 @@ def compute_runtime_plan() -> tuple[
     dict[int, list[int]],
 ]:
     """Compute the same planning products used in project1_nav.main()."""
-    doubled_occ = double_grid_resolution(OCC)
-    doubled_cell = CELL_SIZE_M / 2.0
-    inflated = inflate_obstacles(doubled_occ, inflation_cells=1)
+    doubled_occ = double_grid_resolution(OCC, scale=PLANNING_SCALE)
+    doubled_cell = CELL_SIZE_M / float(PLANNING_SCALE)
+    inflated = inflate_obstacles(doubled_occ, inflation_cells=INFLATION_SUBCELLS)
 
-    start_d = (2 * START_CELL[0] + 1, 2 * START_CELL[1] + 1)
-    goal_d = (2 * GOAL_CELL[0] + 1, 2 * GOAL_CELL[1] + 1)
+    center_offset = PLANNING_SCALE // 2
+    start_d = (PLANNING_SCALE * START_CELL[0] + center_offset, PLANNING_SCALE * START_CELL[1] + center_offset)
+    goal_d = (PLANNING_SCALE * GOAL_CELL[0] + center_offset, PLANNING_SCALE * GOAL_CELL[1] + center_offset)
 
     grid = GridMap(inflated, cell_size_m=doubled_cell, origin_xy=(0.0, 0.0))
     path_full = astar(grid, start_d, goal_d)
@@ -87,14 +90,14 @@ def visualize_grid_and_path() -> None:
     tag_map = build_tag_world_map()
 
     rows, cols = OCC.shape
-    doubled_cell = CELL_SIZE_M / 2.0
+    doubled_cell = CELL_SIZE_M / float(PLANNING_SCALE)
 
     fig, ax = plt.subplots(figsize=(14, 10))
 
     # Draw original map (black obstacles)
     draw_grid(ax, OCC, CELL_SIZE_M)
 
-    # Draw inflated-only safety region (red translucent) at doubled resolution
+    # Draw inflated-only safety region (red translucent) at subcell resolution
     doubled_rows, doubled_cols = inflated.shape
     for r in range(doubled_rows):
         for c in range(doubled_cols):
@@ -150,7 +153,7 @@ def visualize_grid_and_path() -> None:
         color="steelblue",
         linewidth=1.5,
         alpha=0.55,
-        label="A* Full Path (doubled grid)",
+        label=f"A* Full Path ({PLANNING_SCALE}x grid)",
         zorder=3,
     )
 
@@ -198,8 +201,8 @@ def visualize_grid_and_path() -> None:
 
     info = []
     info.append(f"Original grid: {rows}x{cols}, cell={CELL_SIZE_M:.3f}m")
-    info.append(f"Doubled grid: {doubled_occ.shape[0]}x{doubled_occ.shape[1]}, cell={doubled_cell:.3f}m")
-    info.append("Inflation: 1 doubled cell (0.133m guardrail)")
+    info.append(f"Scaled grid: {doubled_occ.shape[0]}x{doubled_occ.shape[1]} ({PLANNING_SCALE}x), cell={doubled_cell:.3f}m")
+    info.append(f"Inflation: {INFLATION_SUBCELLS} subcells ({INFLATION_SUBCELLS/PLANNING_SCALE:.2f} block = {INFLATION_SUBCELLS*doubled_cell:.3f}m)")
     info.append(f"A* full path points: {len(path_full)}")
     info.append(f"Robot follow waypoints: {len(path_follow)}")
     info.append(f"Critical turn points: {len(critical_tags)}")
@@ -220,8 +223,8 @@ def visualize_grid_and_path() -> None:
 
     print("=== Visualization Summary ===")
     print(f"Saved: {out_path}")
-    print(f"Start doubled cell: {path_follow[0]}, world: ({sx:.3f}, {sy:.3f})")
-    print(f"Goal doubled cell:  {path_follow[-1]}, world: ({gx:.3f}, {gy:.3f})")
+    print(f"Start subcell: {path_follow[0]}, world: ({sx:.3f}, {sy:.3f})")
+    print(f"Goal subcell:  {path_follow[-1]}, world: ({gx:.3f}, {gy:.3f})")
     print(f"A* full points: {len(path_full)}")
     print(f"Robot follow waypoints: {len(path_follow)}")
     if critical_tags:

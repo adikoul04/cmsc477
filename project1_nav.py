@@ -56,6 +56,8 @@ K = np.array(
 TAG_FAMILY = "tag36h11"
 TAG_SIZE_M = 0.200
 CELL_SIZE_M = 0.266
+PLANNING_SCALE = 4          # 4x subcell grid
+INFLATION_SUBCELLS = 3      # 3/4 block barrier at 4x scale
 
 # Top-left origin occupancy map (0=free, 1=obstacle)
 OCC = np.array(
@@ -126,12 +128,16 @@ def yaw_from_R(R: np.ndarray) -> float:
     return math.atan2(R[1, 0], R[0, 0])
 
 
-def double_grid_resolution(grid: np.ndarray) -> np.ndarray:
+def double_grid_resolution(grid: np.ndarray, scale: int = 2) -> np.ndarray:
     H, W = grid.shape
-    doubled = np.zeros((2 * H, 2 * W), dtype=int)
+    if scale <= 0:
+        raise ValueError("scale must be >= 1")
+    doubled = np.zeros((scale * H, scale * W), dtype=int)
     for r in range(H):
         for c in range(W):
-            doubled[2 * r : 2 * r + 2, 2 * c : 2 * c + 2] = grid[r, c]
+            r0 = scale * r
+            c0 = scale * c
+            doubled[r0 : r0 + scale, c0 : c0 + scale] = grid[r, c]
     return doubled
 
 
@@ -153,8 +159,8 @@ def doubled_node_to_world(r: int, c: int, doubled_cell_size_m: float) -> Tuple[f
     """
     Convert a doubled-grid node index to world coordinates.
 
-    For doubled planning, nodes represent half-cell lattice points, so world
-    coordinates are index * doubled_cell_size (not cell centers).
+    For subcell planning, nodes represent lattice points, so world coordinates
+    are index * subcell_size (not cell centers).
     """
     return (c * doubled_cell_size_m, r * doubled_cell_size_m)
 
@@ -562,14 +568,16 @@ def main() -> None:
     print("\n=== Planning ===")
     print(f"Original grid: {OCC.shape}, cell={CELL_SIZE_M:.3f} m")
 
-    doubled_occ = double_grid_resolution(OCC)
-    doubled_cell = CELL_SIZE_M / 2.0
+    doubled_occ = double_grid_resolution(OCC, scale=PLANNING_SCALE)
+    doubled_cell = CELL_SIZE_M / float(PLANNING_SCALE)
 
-    # 1 doubled-cell inflation == 0.133 m == 0.5 cube guardrail in original scale.
-    inflated = inflate_obstacles(doubled_occ, inflation_cells=1)
+    # 4x scale + inflation by 3 subcells => 0.75 block barrier (0.1995 m).
+    inflated = inflate_obstacles(doubled_occ, inflation_cells=INFLATION_SUBCELLS)
 
-    start_d = (2 * START_CELL[0] + 1, 2 * START_CELL[1] + 1)
-    goal_d = (2 * GOAL_CELL[0] + 1, 2 * GOAL_CELL[1] + 1)
+    # Place start/goal on subcell lattice at original cell centers.
+    center_offset = PLANNING_SCALE // 2
+    start_d = (PLANNING_SCALE * START_CELL[0] + center_offset, PLANNING_SCALE * START_CELL[1] + center_offset)
+    goal_d = (PLANNING_SCALE * GOAL_CELL[0] + center_offset, PLANNING_SCALE * GOAL_CELL[1] + center_offset)
 
     grid = GridMap(inflated, cell_size_m=doubled_cell, origin_xy=(0.0, 0.0))
     path_rc = astar(grid, start_d, goal_d)

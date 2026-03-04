@@ -17,18 +17,18 @@ This document explains how `project1_nav.py` works, what parts are critical, and
 ## Critical Components
 
 ### 1) Grid preparation and safety inflation
-- `double_grid_resolution(grid)` expands each cell into a 2x2 block.
-- `inflate_obstacles(grid, inflation_cells=1)` inflates obstacles by 1 doubled cell.
+- `double_grid_resolution(grid, scale=4)` expands each cell into a 4x4 subcell block.
+- `inflate_obstacles(grid, inflation_cells=3)` inflates obstacles by 3 subcells.
 
 Why this matters:
 - Robot footprint is approximately `1.5 x 1.0` cubes.
-- Inflating by 1 doubled cell gives a `0.133 m` (half-cube) guardrail around obstacles.
+- Inflating by 3 subcells at 4x scale gives a `0.75 block` barrier (`0.1995 m`) around obstacles.
 
 ### 2) Path planner
 - `GridMap`: occupancy access, bounds checks, and grid->world conversion.
 - `astar(grid, start, goal)`: shortest-path planning with 4-connectivity.
 - `remove_collinear(path)`: simplifies dense A* path to corner waypoints actually used for tracking.
-- `doubled_node_to_world(r, c, doubled_cell)`: converts doubled-grid nodes to world coordinates using half-cell lattice points (`index * doubled_cell`), which keeps tag/path alignment correct.
+- `doubled_node_to_world(r, c, subcell_size)`: converts scaled-grid nodes to world coordinates using lattice points (`index * subcell_size`), which keeps tag/path alignment correct.
 
 ### 3) AprilTag map and localization
 - `build_tag_world_map()`: known map of tag id -> `(x, y, yaw)` in world frame.
@@ -102,8 +102,8 @@ Runtime execution is segment-based:
 This design intentionally avoids using tag-estimated position for distance control.
 
 ## Runtime Workflow (High-Level)
-1. Build doubled and inflated grid.
-2. Convert start/goal to doubled-grid node indices (`2*r+1, 2*c+1`) and plan on that lattice.
+1. Build 4x scaled and inflated grid.
+2. Convert start/goal to scaled-grid node indices (`4*r+2, 4*c+2`) and plan on that lattice.
 3. Run A*.
 4. Simplify path to corner waypoints.
 5. Build tag map and critical-tag map.
