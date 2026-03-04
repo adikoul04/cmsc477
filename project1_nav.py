@@ -81,7 +81,7 @@ START_CELL = (3, 0)
 GOAL_CELL = (3, 10)
 START_ALIGNMENT_TAGS = [32]
 # Enter manual tag sequence here (in order). Example: [32, 38, 44]
-MANUAL_ALIGNMENT_TAGS: List[int] = [32, 33, 36, 46, 45]
+MANUAL_ALIGNMENT_TAGS: List[int] = [32, 35, 36, 39, 46, 45]
 
 # Controller settings
 V_MAX = 0.22

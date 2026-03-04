@@ -4,8 +4,8 @@ Planning scale: 10x
 Inflation: 9 subcells (0.90 block)
 Start subcell: (35, 5)
 Goal subcell:  (35, 105)
-Manual tags:   [32, 33, 36, 46, 45]
-Waypoints:     14
+Manual tags:   [32, 35, 36, 39, 46, 45]
+Waypoints:     16
 
 [PHASE] STARTUP_ALIGNMENT
 ACTION: MANUAL_ALIGN tags=[32]
@@ -31,9 +31,6 @@ ACTION: TURN path heading: -90.0 deg
 ACTION: MOVE_FORWARD 0.638 m
 
 [SEGMENT 4] from (35, 39) to (35, 40)
-ACTION: TURN pre-align for tag 33: -90.0 deg
-ACTION: MANUAL_ALIGN tag=33
-ACTION: TURN return-to-path after tag 33: +90.0 deg
 ACTION: TURN path heading: +90.0 deg
 ACTION: MOVE_FORWARD 0.027 m
 
@@ -41,37 +38,51 @@ ACTION: MOVE_FORWARD 0.027 m
 ACTION: TURN path heading: -90.0 deg
 ACTION: MOVE_FORWARD 0.133 m
 
-[SEGMENT 6] from (30, 40) to (30, 65)
+[SEGMENT 6] from (30, 40) to (30, 45)
 ACTION: TURN path heading: +90.0 deg
-ACTION: MOVE_FORWARD 0.665 m
+ACTION: MOVE_FORWARD 0.133 m
 
-[SEGMENT 7] from (30, 65) to (30, 70)
+[SEGMENT 7] from (30, 45) to (30, 65)
+ACTION: TURN pre-align for tag 35: -90.0 deg
+ACTION: MANUAL_ALIGN tag=35
+ACTION: TURN return-to-path after tag 35: +90.0 deg
+ACTION: TURN path heading: skipped
+ACTION: MOVE_FORWARD 0.532 m
+
+[SEGMENT 8] from (30, 65) to (30, 70)
 ACTION: TURN pre-align for tag 36: -90.0 deg
 ACTION: MANUAL_ALIGN tag=36
 ACTION: TURN return-to-path after tag 36: +90.0 deg
 ACTION: TURN path heading: skipped
 ACTION: MOVE_FORWARD 0.133 m
 
-[SEGMENT 8] from (30, 70) to (59, 70)
+[SEGMENT 9] from (30, 70) to (55, 70)
 ACTION: TURN path heading: +90.0 deg
-ACTION: MOVE_FORWARD 0.771 m
+ACTION: MOVE_FORWARD 0.665 m
 
-[SEGMENT 9] from (59, 70) to (59, 85)
+[SEGMENT 10] from (55, 70) to (59, 70)
+ACTION: TURN pre-align for tag 39: +90.0 deg
+ACTION: MANUAL_ALIGN tag=39
+ACTION: TURN return-to-path after tag 39: -90.0 deg
+ACTION: TURN path heading: skipped
+ACTION: MOVE_FORWARD 0.106 m
+
+[SEGMENT 11] from (59, 70) to (59, 85)
 ACTION: TURN path heading: -90.0 deg
 ACTION: MOVE_FORWARD 0.399 m
 
-[SEGMENT 10] from (59, 85) to (59, 99)
+[SEGMENT 12] from (59, 85) to (59, 99)
 ACTION: TURN pre-align for tag 46: -90.0 deg
 ACTION: MANUAL_ALIGN tag=46
 ACTION: TURN return-to-path after tag 46: +90.0 deg
 ACTION: TURN path heading: skipped
 ACTION: MOVE_FORWARD 0.372 m
 
-[SEGMENT 11] from (59, 99) to (35, 99)
+[SEGMENT 13] from (59, 99) to (35, 99)
 ACTION: TURN path heading: -90.0 deg
 ACTION: MOVE_FORWARD 0.638 m
 
-[SEGMENT 12] from (35, 99) to (35, 105)
+[SEGMENT 14] from (35, 99) to (35, 105)
 ACTION: TURN pre-align for tag 45: -90.0 deg
 ACTION: MANUAL_ALIGN tag=45
 ACTION: TURN return-to-path after tag 45: +90.0 deg
@@ -80,5 +91,5 @@ ACTION: MOVE_FORWARD 0.160 m
 
 [SUMMARY]
 Total forward distance: 5.480 m
-Total absolute turn:    1620.0 deg
-Manual alignment count: 5
+Total absolute turn:    1800.0 deg
+Manual alignment count: 6
