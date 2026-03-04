@@ -4,9 +4,9 @@ Generate a text action plan from project1_nav path + manual tag settings.
 
 Output includes:
 - startup alignment,
-- turns,
-- forward moves,
-- manual alignment events.
+- tag-related turns,
+- manual align events,
+- translation move direction relative to robot orientation.
 """
 
 import math
@@ -17,6 +17,7 @@ from project1_nav import (
     GOAL_CELL,
     INFLATION_SUBCELLS,
     MANUAL_ALIGNMENT_TAGS,
+    MOVE_SPEED_MPS,
     OCC,
     PLANNING_SCALE,
     START_ALIGNMENT_TAGS,
@@ -31,22 +32,27 @@ from project1_nav import (
     inflate_obstacles,
     manual_waypoint_map,
     remove_collinear,
+    world_delta_to_robot_cmd,
     wrap_to_pi,
 )
 
 
-def desired_yaw_from_step(dr: int, dc: int) -> float:
-    if dc > 0:
-        return 0.0
-    if dc < 0:
-        return math.pi
-    if dr > 0:
-        return math.pi / 2
-    return -math.pi / 2
-
-
 def deg(rad: float) -> float:
     return math.degrees(rad)
+
+
+def relative_direction_label(x_cmd: float, y_cmd: float) -> str:
+    ax, ay = abs(x_cmd), abs(y_cmd)
+    eps = 1e-4
+    if ax < eps and ay < eps:
+        return "none"
+    if ax >= 2.0 * ay:
+        return "forward" if x_cmd > 0 else "backward"
+    if ay >= 2.0 * ax:
+        return "left" if y_cmd > 0 else "right"
+    fwd = "forward" if x_cmd > 0 else "backward"
+    lat = "left" if y_cmd > 0 else "right"
+    return f"{fwd}-{lat}"
 
 
 def main() -> None:
@@ -105,16 +111,13 @@ def main() -> None:
     total_forward = 0.0
     total_turn_abs = 0.0
 
-    # Segment-by-segment execution plan.
     for i in range(len(path_exec) - 1):
         lines.append(f"[SEGMENT {i}] from {path_exec[i]} to {path_exec[i+1]}")
 
-        # Manual alignment waypoint actions before continuing path.
         if i in manual_wp_tags:
             for tag_id in manual_wp_tags[i]:
                 tag_yaw = tag_map[tag_id].yaw
                 facing_yaw = wrap_to_pi(tag_yaw + math.pi)
-                path_heading_at_wp = expected_yaw
 
                 pre_turn = wrap_to_pi(facing_yaw - expected_yaw)
                 pre_deg = deg(pre_turn)
@@ -126,42 +129,26 @@ def main() -> None:
                     lines.append(f"ACTION: TURN pre-align for tag {tag_id}: skipped (already facing tag)")
 
                 lines.append(f"ACTION: MANUAL_ALIGN tag={tag_id}")
+                expected_yaw = facing_yaw
 
-                back_turn = wrap_to_pi(path_heading_at_wp - expected_yaw)
-                back_deg = deg(back_turn)
-                if abs(back_deg) > 1.0:
-                    lines.append(f"ACTION: TURN return-to-path after tag {tag_id}: {back_deg:+.1f} deg")
-                    total_turn_abs += abs(back_deg)
-                else:
-                    lines.append(f"ACTION: TURN return-to-path after tag {tag_id}: skipped")
-                expected_yaw = path_heading_at_wp
-
-        # Path heading turn.
-        r0, c0 = path_exec[i]
-        r1, c1 = path_exec[i + 1]
-        dr, dc = (r1 - r0), (c1 - c0)
-        desired_yaw = desired_yaw_from_step(dr, dc)
-        turn = wrap_to_pi(desired_yaw - expected_yaw)
-        turn_deg = deg(turn)
-        if abs(turn_deg) > 1.0:
-            lines.append(f"ACTION: TURN path heading: {turn_deg:+.1f} deg")
-            total_turn_abs += abs(turn_deg)
-        else:
-            lines.append("ACTION: TURN path heading: skipped")
-        expected_yaw = desired_yaw
-
-        # Forward move distance.
         x0, y0 = path_xy[i]
         x1, y1 = path_xy[i + 1]
-        dist = math.hypot(x1 - x0, y1 - y0)
+        dx, dy = (x1 - x0), (y1 - y0)
+        dist = math.hypot(dx, dy)
         total_forward += dist
-        lines.append(f"ACTION: MOVE_FORWARD {dist:.3f} m")
+
+        x_cmd, y_cmd = world_delta_to_robot_cmd(dx, dy, expected_yaw, MOVE_SPEED_MPS)
+        rel_dir = relative_direction_label(x_cmd, y_cmd)
+        lines.append(
+            f"ACTION: MOVE_TRANSLATE {dist:.3f} m | robot-frame dir={rel_dir} "
+            f"(x_cmd={x_cmd:+.3f}, y_cmd={y_cmd:+.3f})"
+        )
         lines.append("")
 
     lines.append("[SUMMARY]")
-    lines.append(f"Total forward distance: {total_forward:.3f} m")
-    lines.append(f"Total absolute turn:    {total_turn_abs:.1f} deg")
-    lines.append(f"Manual alignment count: {sum(len(v) for v in manual_wp_tags.values())}")
+    lines.append(f"Total translate distance: {total_forward:.3f} m")
+    lines.append(f"Total absolute turn:      {total_turn_abs:.1f} deg")
+    lines.append(f"Manual alignment count:   {sum(len(v) for v in manual_wp_tags.values())}")
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote {out_path.resolve()}")

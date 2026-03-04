@@ -81,7 +81,7 @@ START_CELL = (3, 0)
 GOAL_CELL = (3, 10)
 START_ALIGNMENT_TAGS = [32]
 # Enter manual tag sequence here (in order). Example: [32, 38, 44]
-MANUAL_ALIGNMENT_TAGS: List[int] = [32, 35, 36, 39, 46, 45]
+MANUAL_ALIGNMENT_TAGS: List[int] = [32, 34, 35, 36, 39, 46, 45]
 
 # Controller settings
 V_MAX = 0.22
@@ -89,6 +89,8 @@ W_MAX_DEG = 65.0
 K_RHO = 0.9
 K_ALPHA = 2.2
 WAYPOINT_TOL_M = 0.08
+MOVE_SPEED_MPS = 0.20
+STRAFE_SIGN = -1.0  # flip to -1.0 if lateral direction is inverted on your robot
 
 
 # =========================
@@ -167,6 +169,24 @@ def doubled_node_to_world(r: int, c: int, doubled_cell_size_m: float) -> Tuple[f
     are index * subcell_size (not cell centers).
     """
     return (c * doubled_cell_size_m, r * doubled_cell_size_m)
+
+
+def world_delta_to_robot_cmd(dx: float, dy: float, yaw: float, speed_mps: float) -> Tuple[float, float]:
+    """
+    Convert desired world displacement direction into robot-frame x/y translation command.
+    x: forward/backward in robot frame
+    y: lateral in robot frame
+    """
+    fx, fy = math.cos(yaw), math.sin(yaw)       # robot forward axis in world
+    lx, ly = -math.sin(yaw), math.cos(yaw)      # robot left axis in world
+
+    cmd_x = dx * fx + dy * fy
+    cmd_y = (dx * lx + dy * ly) * STRAFE_SIGN
+
+    n = math.hypot(cmd_x, cmd_y)
+    if n < 1e-9:
+        return 0.0, 0.0
+    return speed_mps * (cmd_x / n), speed_mps * (cmd_y / n)
 
 
 # =========================
@@ -844,7 +864,7 @@ def main() -> None:
         else 0.0
     )
     turn_speed_deg = 30.0
-    move_speed_mps = 0.15
+    move_speed_mps = MOVE_SPEED_MPS
     completed = False
 
     def execute_turn(delta_yaw_rad: float, label: str) -> None:
@@ -859,15 +879,6 @@ def main() -> None:
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
         time.sleep(0.2)
 
-    def desired_yaw_from_step(dr: int, dc: int) -> float:
-        if dc > 0:
-            return 0.0
-        if dc < 0:
-            return math.pi
-        if dr > 0:
-            return math.pi / 2
-        return -math.pi / 2
-
     try:
         for i in range(len(path_rc) - 1):
             # Manual alignment at configured waypoints.
@@ -875,7 +886,6 @@ def main() -> None:
                 for tag_id in manual_wp_tags[i]:
                     tag_yaw = tag_world_map[tag_id].yaw
                     facing_yaw = wrap_to_pi(tag_yaw + math.pi)  # robot sees tag when opposite tag yaw
-                    path_heading_at_wp = expected_yaw
 
                     # If already facing the tag, skip pre-turn.
                     pre_turn = wrap_to_pi(facing_yaw - expected_yaw)
@@ -893,25 +903,21 @@ def main() -> None:
                         [tag_id],
                         timeout_s=None,
                     )
-                    execute_turn(path_heading_at_wp - expected_yaw, label=f"Waypoint {i} return-to-path")
-                    expected_yaw = path_heading_at_wp
+                    # After centering, robot is assumed to face opposite tag yaw.
+                    expected_yaw = facing_yaw
 
             r0, c0 = path_rc[i]
             r1, c1 = path_rc[i + 1]
-            dr, dc = (r1 - r0), (c1 - c0)
-            desired_yaw = desired_yaw_from_step(dr, dc)
 
-            # Turn to desired heading (open-loop timing).
-            execute_turn(desired_yaw - expected_yaw, label=f"Segment {i}")
-            expected_yaw = desired_yaw
-
-            # Move exact known segment distance from map geometry.
+            # Move in world path direction using robot-frame x/y translation.
             x0, y0 = path_xy[i]
             x1, y1 = path_xy[i + 1]
-            dist = math.hypot(x1 - x0, y1 - y0)
+            dx, dy = (x1 - x0), (y1 - y0)
+            dist = math.hypot(dx, dy)
             t_move = dist / move_speed_mps if move_speed_mps > 1e-6 else 0.0
-            print(f"Segment {i}: move {dist:.3f} m")
-            ep_chassis.drive_speed(x=move_speed_mps, y=0.0, z=0.0, timeout=5)
+            x_cmd, y_cmd = world_delta_to_robot_cmd(dx, dy, expected_yaw, move_speed_mps)
+            print(f"Segment {i}: move {dist:.3f} m (x_cmd={x_cmd:+.3f}, y_cmd={y_cmd:+.3f})")
+            ep_chassis.drive_speed(x=x_cmd, y=y_cmd, z=0.0, timeout=5)
             time.sleep(t_move)
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=1)
             time.sleep(0.2)
