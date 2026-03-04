@@ -108,11 +108,12 @@ This design intentionally avoids using tag-estimated position for distance contr
 4. Simplify path to corner waypoints.
 5. Build tag map and critical-tag map.
 6. Initialize RoboMaster and video stream.
-7. Execute segments:
+7. Perform startup alignment by centering Tag 32 (known start-facing tag).
+8. Execute segments:
    - re-center using critical tags at turn waypoints,
    - timed turn to outgoing segment heading,
    - timed forward move for known segment distance.
-8. Stop robot, close camera, cleanup.
+9. Stop robot, close camera, cleanup.
 
 ## Key Tuning Parameters
 - `turn_speed_deg`: turn rate used for timed turns.

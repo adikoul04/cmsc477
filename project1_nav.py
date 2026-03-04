@@ -78,6 +78,7 @@ OCC = np.array(
 # Start/goal in original grid cells (top-left origin)
 START_CELL = (3, 0)
 GOAL_CELL = (3, 10)
+START_ALIGNMENT_TAGS = [32]
 
 # Controller settings
 V_MAX = 0.22
@@ -519,8 +520,8 @@ def center_tag_in_view(
     ep_camera,
     detector: AprilTagDetector,
     target_ids: List[int],
-    timeout_s: float = 1.5,
-    tol_px: float = 24.0,
+    timeout_s: float = 3.0,
+    tol_px: float = 10.0,
 ) -> bool:
     """Rotate in place to center target tag in camera frame."""
     t0 = time.time()
@@ -613,6 +614,21 @@ def main() -> None:
 
     cv2.namedWindow("Robot Camera", cv2.WINDOW_NORMAL)
     print("Press 'q' to stop.")
+
+    # Startup heading alignment: center Tag 32 before executing the path.
+    print(f"Startup alignment: centering tags {START_ALIGNMENT_TAGS}")
+    aligned = center_tag_in_view(
+        ep_chassis,
+        ep_camera,
+        detector,
+        START_ALIGNMENT_TAGS,
+        timeout_s=3.0,
+        tol_px=20.0,
+    )
+    if aligned:
+        print("Startup alignment complete.")
+    else:
+        print("Startup alignment timed out; proceeding with current heading.")
 
     # Open-loop execution by known segment distances.
     # Assumes initial robot heading is +x (to the right on map).
