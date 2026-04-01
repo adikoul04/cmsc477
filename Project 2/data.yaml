@@ -1,0 +1,6 @@
+path: ./datasets
+train: train
+val: validation
+
+nc: 1
+names: ["tower"]
