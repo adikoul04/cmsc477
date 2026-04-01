@@ -1,0 +1,5 @@
+path: ./ # After first run, YOLO expects all datasets to be in path+"/datsets"
+train: robomaster_train
+val: robomaster_validation
+nc: 1  # Number of classes (1 for only "object")
+names: ["robomaster"]
