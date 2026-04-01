@@ -6,6 +6,7 @@ import traceback
 from queue import Empty
 from robomaster import robot
 from robomaster import camera
+import robomaster
 
 class AprilTagDetector:
     def __init__(self, K, family="tag36h11", threads=2, marker_size_m=0.16):
@@ -65,8 +66,12 @@ if __name__ == '__main__':
     # More legible printing from numpy.
     np.set_printoptions(precision=3, suppress=True, linewidth=120)
 
+
     ep_robot = robot.Robot()
-    ep_robot.initialize(conn_type="ap")#(conn_type="sta", sn="3JKCH7T00100J0")
+    robomaster.config.ROBOT_IP_STR = "192.168.50.117"
+    # ep_robot.initialize(conn_type="ap")
+    #(conn_type="sta", sn="3JKCH7T00100J0")
+    ep_robot.initialize(conn_type="sta", sn="3JKCH8800100RC")
     ep_chassis = ep_robot.chassis
     ep_camera = ep_robot.camera
     ep_camera.start_video_stream(display=False, resolution=camera.STREAM_360P)
