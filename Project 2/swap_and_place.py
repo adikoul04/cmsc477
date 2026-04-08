@@ -16,7 +16,6 @@ import argparse
 import math
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from queue import Empty
 from typing import List, Optional, Tuple
 
@@ -25,7 +24,15 @@ from ultralytics import YOLO
 
 from robomaster import camera
 
-from tower_utils import DEFAULT_ROBOT_IP, DEFAULT_ROBOT_SN, connect_robot, pick_up_tower, place_down_tower
+from tower_utils import (
+    DEFAULT_MODEL_PATH,
+    DEFAULT_ROBOT_IP,
+    DEFAULT_ROBOT_SN,
+    connect_robot,
+    go_to_tower,
+    pick_up_tower,
+    place_down_tower,
+)
 
 
 # Camera intrinsics used in your nav/perception codebase.
@@ -77,7 +84,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Swap two LEGO towers with YOLO + RoboMaster")
     parser.add_argument(
         "--model-path",
-        default=str(Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt"),
+        default=str(DEFAULT_MODEL_PATH),
         help="Path to fine-tuned YOLO weights.",
     )
     parser.add_argument("--conn-type", default="sta", choices=["sta", "ap"], help="Robot connection mode.")
@@ -539,17 +546,13 @@ def main() -> None:
 
         print("[2/8] Going to tower 1 and picking it up...")
         move_relative(ep_chassis, tracker, tower1_slot.forward_m, tower1_slot.lateral_m, args.xy_speed)
-        align_and_approach_target(
-            ep_chassis=ep_chassis,
-            ep_camera=ep_camera,
+        go_to_tower(
+            ep_robot=ep_robot,
             model=model,
-            tracker=tracker,
-            conf_thresh=args.detect_conf,
+            ep_camera=ep_camera,
+            ep_chassis=ep_chassis,
             target_class=args.target_class,
-            expected_lateral_m=tower1_slot.lateral_m,
-            tower_height_m=args.tower_height_m,
-            forbidden_center_world=None,
-            forbidden_radius_m=0.0,
+            conf_thresh=args.detect_conf,
             desired_h_px=args.align_desired_h_px,
             center_tol_px=args.align_center_tol_px,
             height_tol_px=args.align_height_tol_px,
@@ -569,17 +572,13 @@ def main() -> None:
         print("[4/8] Returning home and fetching tower 2...")
         return_home(ep_chassis, tracker, args.xy_speed)
         move_relative(ep_chassis, tracker, tower2_slot.forward_m, tower2_slot.lateral_m, args.xy_speed)
-        align_and_approach_target(
-            ep_chassis=ep_chassis,
-            ep_camera=ep_camera,
+        go_to_tower(
+            ep_robot=ep_robot,
             model=model,
-            tracker=tracker,
-            conf_thresh=args.detect_conf,
+            ep_camera=ep_camera,
+            ep_chassis=ep_chassis,
             target_class=args.target_class,
-            expected_lateral_m=tower2_slot.lateral_m,
-            tower_height_m=args.tower_height_m,
-            forbidden_center_world=None,
-            forbidden_radius_m=0.0,
+            conf_thresh=args.detect_conf,
             desired_h_px=args.align_desired_h_px,
             center_tol_px=args.align_center_tol_px,
             height_tol_px=args.align_height_tol_px,
