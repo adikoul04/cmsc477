@@ -1,0 +1,20 @@
+# Core computer vision / YOLO stack
+ultralytics
+opencv-python
+torch
+
+# RoboMaster SDK
+robomaster
+
+# Scientific / plotting utilities used in Project 1 and examples
+numpy
+matplotlib
+
+# AprilTag and QR / image helpers used in the example scripts
+pupil-apriltags
+MyQR
+Pillow
+
+# Common transitive helper packages for the above libraries
+qrcode
+pypng
