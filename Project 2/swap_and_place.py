@@ -16,6 +16,7 @@ import argparse
 import math
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Empty
 from typing import List, Optional, Tuple
 
@@ -76,7 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Swap two LEGO towers with YOLO + RoboMaster")
     parser.add_argument(
         "--model-path",
-        default="cmsc477_yolo/runs/detect/train/weights/best.pt",
+        default=str(Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt"),
         help="Path to fine-tuned YOLO weights.",
     )
     parser.add_argument("--conn-type", default="sta", choices=["sta", "ap"], help="Robot connection mode.")
@@ -143,10 +144,7 @@ def clamp(x: float, lo: float, hi: float) -> float:
 
 
 def get_detections(model: YOLO, frame, conf_thresh: float, target_class: Optional[int]) -> List[Detection]:
-    if model.predictor:
-        model.predictor.args.verbose = False
-
-    result = model.predict(source=frame, show=False, conf=conf_thresh)[0]
+    result = model.predict(source=frame, show=False, conf=conf_thresh, verbose=False)[0]
     out: List[Detection] = []
 
     if result.boxes is None:
@@ -545,10 +543,13 @@ def main() -> None:
             ep_chassis=ep_chassis,
             ep_camera=ep_camera,
             model=model,
+            tracker=tracker,
             conf_thresh=args.detect_conf,
             target_class=args.target_class,
             expected_lateral_m=tower1_slot.lateral_m,
             tower_height_m=args.tower_height_m,
+            forbidden_center_world=None,
+            forbidden_radius_m=0.0,
             desired_h_px=args.align_desired_h_px,
             center_tol_px=args.align_center_tol_px,
             height_tol_px=args.align_height_tol_px,
@@ -572,10 +573,13 @@ def main() -> None:
             ep_chassis=ep_chassis,
             ep_camera=ep_camera,
             model=model,
+            tracker=tracker,
             conf_thresh=args.detect_conf,
             target_class=args.target_class,
             expected_lateral_m=tower2_slot.lateral_m,
             tower_height_m=args.tower_height_m,
+            forbidden_center_world=None,
+            forbidden_radius_m=0.0,
             desired_h_px=args.align_desired_h_px,
             center_tol_px=args.align_center_tol_px,
             height_tol_px=args.align_height_tol_px,
