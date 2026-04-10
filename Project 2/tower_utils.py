@@ -12,13 +12,19 @@ from robomaster import camera
 from capture_robot_images import DEFAULT_ROBOT_IP, DEFAULT_ROBOT_SN
 
 
-DEFAULT_MODEL_PATH = (
-    Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt"
+_PROJECT_DIR = Path(__file__).resolve().parent
+_MODEL_CANDIDATES = (
+    _PROJECT_DIR / "cmsc477_yolo" / "runs" / "detect" / "train" / "weights" / "best.pt",
+    Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt",
 )
+DEFAULT_MODEL_PATH = next((path for path in _MODEL_CANDIDATES if path.exists()), _MODEL_CANDIDATES[0])
 DEFAULT_DETECT_CONF = 0.45
+DEFAULT_STOP_METRIC = "top_y"
 DEFAULT_DESIRED_H_PX = 170.0
+DEFAULT_TARGET_TOP_Y_RATIO = 0.72
 DEFAULT_ALIGN_CENTER_TOL_PX = 24.0
 DEFAULT_ALIGN_HEIGHT_TOL_PX = 16.0
+DEFAULT_ALIGN_TOP_TOL_PX = 18.0
 DEFAULT_K_FORWARD = 0.0028
 DEFAULT_K_LATERAL = 0.0038
 DEFAULT_LATERAL_SIGN = -1.0
@@ -63,6 +69,15 @@ def start_camera_stream(ep_robot, resolution="360p"):
     return ep_camera
 
 
+def move_arm_to_top(
+    ep_robot,
+    arm_x=DEFAULT_ARM_X,
+    raised_y=DEFAULT_RAISED_Y,
+):
+    """Move the arm to the raised reference posture used for travel/calibration."""
+    ep_robot.robotic_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
+
+
 def get_detections(model, frame, conf_thresh=DEFAULT_DETECT_CONF, target_class=None):
     result = model.predict(source=frame, show=False, conf=conf_thresh, verbose=False)[0]
     detections = []
@@ -92,6 +107,16 @@ def get_detections(model, frame, conf_thresh=DEFAULT_DETECT_CONF, target_class=N
     return detections
 
 
+def select_detection(detections, selection_mode="conf", frame_center_x=None):
+    if not detections:
+        return None
+
+    if selection_mode == "center" and frame_center_x is not None:
+        return min(detections, key=lambda detection: (abs(detection.cx - frame_center_x), -detection.conf))
+
+    return max(detections, key=lambda detection: detection.conf)
+
+
 def go_to_tower(
     ep_robot,
     model,
@@ -99,18 +124,27 @@ def go_to_tower(
     ep_chassis=None,
     target_class=None,
     conf_thresh=DEFAULT_DETECT_CONF,
+    stop_metric=DEFAULT_STOP_METRIC,
     desired_h_px=DEFAULT_DESIRED_H_PX,
+    target_top_y_ratio=DEFAULT_TARGET_TOP_Y_RATIO,
     center_tol_px=DEFAULT_ALIGN_CENTER_TOL_PX,
     height_tol_px=DEFAULT_ALIGN_HEIGHT_TOL_PX,
+    top_y_tol_px=DEFAULT_ALIGN_TOP_TOL_PX,
     k_forward=DEFAULT_K_FORWARD,
     k_lateral=DEFAULT_K_LATERAL,
     lateral_sign=DEFAULT_LATERAL_SIGN,
     max_v=DEFAULT_MAX_V,
     step_s=DEFAULT_SERVO_STEP_S,
     timeout_s=20.0,
+    pose_tracker=None,
+    selection_mode="conf",
     show=False,
 ):
     owns_camera = ep_camera is None
+    valid_stop_metrics = {"height", "top_y"}
+    if stop_metric not in valid_stop_metrics:
+        raise ValueError(f"Unsupported stop_metric '{stop_metric}'. Use one of {sorted(valid_stop_metrics)}.")
+
     if ep_camera is None:
         ep_camera = ep_robot.camera
         ep_camera.start_video_stream(display=False, resolution=camera.STREAM_360P)
@@ -123,6 +157,7 @@ def go_to_tower(
     t0 = time.time()
 
     try:
+        move_arm_to_top(ep_robot)
         while True:
             if time.time() - t0 > timeout_s:
                 raise TimeoutError("Timed out while approaching a tower.")
@@ -145,17 +180,34 @@ def go_to_tower(
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
                 continue
 
-            selected = max(detections, key=lambda detection: detection.conf)
             frame_center_x = frame.shape[1] / 2.0
+            selected = select_detection(
+                detections=detections,
+                selection_mode=selection_mode,
+                frame_center_x=frame_center_x,
+            )
+            frame_height = frame.shape[0]
+            y_top_px = selected.cy - selected.h / 2.0
             err_x_px = selected.cx - frame_center_x
-            err_h_px = desired_h_px - selected.h
 
-            v_forward = clamp(k_forward * err_h_px, -max_v, max_v)
+            if stop_metric == "height":
+                err_forward_px = desired_h_px - selected.h
+                forward_tol_px = height_tol_px
+                err_label = "err_h"
+            else:
+                target_top_y_px = target_top_y_ratio * frame_height
+                err_forward_px = target_top_y_px - y_top_px
+                forward_tol_px = top_y_tol_px
+                err_label = "err_top"
+
+            v_forward = clamp(k_forward * err_forward_px, -max_v, max_v)
             v_lateral = clamp(lateral_sign * k_lateral * err_x_px, -max_v, max_v)
 
             ep_chassis.drive_speed(x=v_forward, y=v_lateral, z=0.0, timeout=step_s)
+            if pose_tracker is not None:
+                pose_tracker.integrate(v_forward * step_s, v_lateral * step_s)
 
-            if abs(err_x_px) <= center_tol_px and abs(err_h_px) <= height_tol_px:
+            if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= forward_tol_px:
                 stable += 1
             else:
                 stable = 0
@@ -170,7 +222,7 @@ def go_to_tower(
                 cv2.line(dbg, (int(frame_center_x), 0), (int(frame_center_x), dbg.shape[0] - 1), (0, 255, 255), 1)
                 cv2.putText(
                     dbg,
-                    f"err_x={err_x_px:+.1f}px err_h={err_h_px:+.1f}px stable={stable}/4",
+                    f"err_x={err_x_px:+.1f}px {err_label}={err_forward_px:+.1f}px stable={stable}/4",
                     (10, 22),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -225,6 +277,7 @@ def pick_up_tower(
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
 
+        move_arm_to_top(ep_robot, arm_x=arm_x, raised_y=raised_y)
         ep_arm.moveto(x=arm_x, y=approach_y).wait_for_completed()
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
 
@@ -260,6 +313,7 @@ def place_down_tower(
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
 
+        move_arm_to_top(ep_robot, arm_x=arm_x, raised_y=raised_y)
         ep_arm.moveto(x=arm_x, y=approach_y).wait_for_completed()
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
 
@@ -268,6 +322,7 @@ def place_down_tower(
         ep_gripper.pause()
 
         ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
+        move_arm_to_top(ep_robot, arm_x=arm_x, raised_y=raised_y)
         return ep_robot
     finally:
         if owns_robot:

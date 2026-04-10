@@ -25,9 +25,12 @@ from ultralytics import YOLO
 from robomaster import camera
 
 from tower_utils import (
+    DEFAULT_ALIGN_TOP_TOL_PX,
     DEFAULT_MODEL_PATH,
     DEFAULT_ROBOT_IP,
     DEFAULT_ROBOT_SN,
+    DEFAULT_STOP_METRIC,
+    DEFAULT_TARGET_TOP_Y_RATIO,
     connect_robot,
     go_to_tower,
     pick_up_tower,
@@ -62,6 +65,7 @@ class SearchCandidate:
     detection: Detection
     world_pose: RelativeTarget
     exclusion_distance_m: float
+    target_distance_m: float
 
 
 class PoseTracker:
@@ -106,10 +110,28 @@ def parse_args() -> argparse.Namespace:
         "--align-desired-h-px",
         type=float,
         default=170.0,
-        help="Desired bbox height in pixels when at pickup standoff.",
+        help="Desired bbox height in pixels when at pickup standoff (used with --stop-metric=height).",
+    )
+    parser.add_argument(
+        "--stop-metric",
+        default=DEFAULT_STOP_METRIC,
+        choices=["height", "top_y"],
+        help="Forward stop metric for visual servo: bbox height or bbox top y-position.",
+    )
+    parser.add_argument(
+        "--target-top-y-ratio",
+        type=float,
+        default=DEFAULT_TARGET_TOP_Y_RATIO,
+        help="Target top-of-bbox y as a fraction of frame height when using --stop-metric=top_y.",
     )
     parser.add_argument("--align-center-tol-px", type=float, default=24.0, help="Horizontal center tolerance in px.")
     parser.add_argument("--align-height-tol-px", type=float, default=16.0, help="BBox height tolerance in px.")
+    parser.add_argument(
+        "--align-top-tol-px",
+        type=float,
+        default=DEFAULT_ALIGN_TOP_TOL_PX,
+        help="Top-of-bbox y tolerance in px when using --stop-metric=top_y.",
+    )
 
     parser.add_argument("--k-forward", type=float, default=0.0028, help="P gain from height error to forward speed.")
     parser.add_argument("--k-lateral", type=float, default=0.0038, help="P gain from x error to lateral speed.")
@@ -255,6 +277,7 @@ def select_detection_outside_exclusion(
     tower_height_m: float,
     forbidden_center_world: Optional[RelativeTarget],
     forbidden_radius_m: float,
+    target_world: Optional[RelativeTarget] = None,
     expected_lateral_m: Optional[float] = None,
 ) -> Optional[SearchCandidate]:
     valid: List[SearchCandidate] = []
@@ -268,16 +291,25 @@ def select_detection_outside_exclusion(
         else:
             exclusion_distance_m = float("inf")
 
+        if target_world is not None:
+            target_distance_m = distance_m(world_pose, target_world)
+        else:
+            target_distance_m = float("inf")
+
         valid.append(
             SearchCandidate(
                 detection=det,
                 world_pose=world_pose,
                 exclusion_distance_m=exclusion_distance_m,
+                target_distance_m=target_distance_m,
             )
         )
 
     if not valid:
         return None
+
+    if target_world is not None:
+        return min(valid, key=lambda cand: (cand.target_distance_m, -cand.detection.conf, -cand.exclusion_distance_m))
 
     if expected_lateral_m is None:
         return max(valid, key=lambda cand: (cand.detection.conf, cand.exclusion_distance_m))
@@ -296,19 +328,21 @@ def choose_detection(
     expected_lateral_m: Optional[float],
     tower_height_m: float,
     tracker: Optional[PoseTracker] = None,
+    target_world: Optional[RelativeTarget] = None,
     forbidden_center_world: Optional[RelativeTarget] = None,
     forbidden_radius_m: float = 0.0,
 ) -> Optional[Detection]:
     if not detections:
         return None
 
-    if tracker is not None and forbidden_center_world is not None:
+    if tracker is not None and (forbidden_center_world is not None or target_world is not None):
         candidate = select_detection_outside_exclusion(
             detections=detections,
             tracker=tracker,
             tower_height_m=tower_height_m,
             forbidden_center_world=forbidden_center_world,
             forbidden_radius_m=forbidden_radius_m,
+            target_world=target_world,
             expected_lateral_m=expected_lateral_m,
         )
         return None if candidate is None else candidate.detection
@@ -346,11 +380,15 @@ def align_and_approach_target(
     target_class: Optional[int],
     expected_lateral_m: Optional[float],
     tower_height_m: float,
+    target_world: Optional[RelativeTarget],
     forbidden_center_world: Optional[RelativeTarget],
     forbidden_radius_m: float,
+    stop_metric: str,
     desired_h_px: float,
+    target_top_y_ratio: float,
     center_tol_px: float,
     height_tol_px: float,
+    top_y_tol_px: float,
     k_forward: float,
     k_lateral: float,
     lateral_sign: float,
@@ -359,6 +397,10 @@ def align_and_approach_target(
     show: bool,
     timeout_s: float = 20.0,
 ) -> Detection:
+    valid_stop_metrics = {"height", "top_y"}
+    if stop_metric not in valid_stop_metrics:
+        raise ValueError(f"Unsupported stop_metric '{stop_metric}'. Use one of {sorted(valid_stop_metrics)}.")
+
     t0 = time.time()
     stable = 0
     selected: Optional[Detection] = None
@@ -380,6 +422,7 @@ def align_and_approach_target(
             expected_lateral_m,
             tower_height_m,
             tracker=tracker,
+            target_world=target_world,
             forbidden_center_world=forbidden_center_world,
             forbidden_radius_m=forbidden_radius_m,
         )
@@ -388,14 +431,24 @@ def align_and_approach_target(
             continue
 
         err_x_px = selected.cx - CX_PX
-        err_h_px = desired_h_px - selected.h
+        y_top_px = selected.cy - selected.h / 2.0
+        if stop_metric == "height":
+            err_forward_px = desired_h_px - selected.h
+            forward_tol_px = height_tol_px
+            err_label = "err_h"
+        else:
+            target_top_y_px = target_top_y_ratio * frame.shape[0]
+            err_forward_px = target_top_y_px - y_top_px
+            forward_tol_px = top_y_tol_px
+            err_label = "err_top"
 
-        v_forward = clamp(k_forward * err_h_px, -max_v, max_v)
+        v_forward = clamp(k_forward * err_forward_px, -max_v, max_v)
         v_lateral = clamp(lateral_sign * k_lateral * err_x_px, -max_v, max_v)
 
         ep_chassis.drive_speed(x=v_forward, y=v_lateral, z=0.0, timeout=step_s)
+        tracker.integrate(v_forward * step_s, v_lateral * step_s)
 
-        if abs(err_x_px) <= center_tol_px and abs(err_h_px) <= height_tol_px:
+        if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= forward_tol_px:
             stable += 1
         else:
             stable = 0
@@ -410,7 +463,7 @@ def align_and_approach_target(
             cv2.line(dbg, (int(CX_PX), 0), (int(CX_PX), dbg.shape[0] - 1), (0, 255, 255), 1)
             cv2.putText(
                 dbg,
-                f"err_x={err_x_px:+.1f}px err_h={err_h_px:+.1f}px stable={stable}/4",
+                f"err_x={err_x_px:+.1f}px {err_label}={err_forward_px:+.1f}px stable={stable}/4",
                 (10, 22),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
@@ -459,6 +512,7 @@ def reacquire_any_tower_with_sweep(
                 tower_height_m=tower_height_m,
                 forbidden_center_world=forbidden_center_world,
                 forbidden_radius_m=forbidden_radius_m,
+                target_world=None,
                 expected_lateral_m=None,
             )
             if candidate is not None:
@@ -510,6 +564,11 @@ def main() -> None:
     args = parse_args()
     model = YOLO(args.model_path)
 
+    print(
+        "Note: this script now tracks tower identity and robot pose more carefully, "
+        "but it still cannot re-find moved empty placement targets unless you add target detection."
+    )
+
     ep_robot = connect_robot(
         conn_type=args.conn_type,
         robot_ip=args.robot_ip,
@@ -534,7 +593,6 @@ def main() -> None:
 
         tower1_rel = estimate_relative_target(tower1_det, args.tower_height_m)
         tower2_rel = estimate_relative_target(tower2_det, args.tower_height_m)
-
         tower1_slot = RelativeTarget(
             forward_m=max(0.05, tower1_rel.forward_m - args.pickup_standoff_m),
             lateral_m=tower1_rel.lateral_m,
@@ -553,14 +611,19 @@ def main() -> None:
             ep_chassis=ep_chassis,
             target_class=args.target_class,
             conf_thresh=args.detect_conf,
+            stop_metric=args.stop_metric,
             desired_h_px=args.align_desired_h_px,
+            target_top_y_ratio=args.target_top_y_ratio,
             center_tol_px=args.align_center_tol_px,
             height_tol_px=args.align_height_tol_px,
+            top_y_tol_px=args.align_top_tol_px,
             k_forward=args.k_forward,
             k_lateral=args.k_lateral,
             lateral_sign=args.lateral_sign,
             max_v=args.max_v,
             step_s=args.servo_step_s,
+            pose_tracker=tracker,
+            selection_mode="center",
             show=args.show,
         )
         pick_up_tower(ep_robot=ep_robot)
@@ -579,14 +642,19 @@ def main() -> None:
             ep_chassis=ep_chassis,
             target_class=args.target_class,
             conf_thresh=args.detect_conf,
+            stop_metric=args.stop_metric,
             desired_h_px=args.align_desired_h_px,
+            target_top_y_ratio=args.target_top_y_ratio,
             center_tol_px=args.align_center_tol_px,
             height_tol_px=args.align_height_tol_px,
+            top_y_tol_px=args.align_top_tol_px,
             k_forward=args.k_forward,
             k_lateral=args.k_lateral,
             lateral_sign=args.lateral_sign,
             max_v=args.max_v,
             step_s=args.servo_step_s,
+            pose_tracker=tracker,
+            selection_mode="center",
             show=args.show,
         )
         pick_up_tower(ep_robot=ep_robot)
@@ -623,25 +691,26 @@ def main() -> None:
             raise RuntimeError("Could not reacquire moved tower 1 during search sweeps.")
 
         print("[7/8] Aligning to reacquired tower 1 and picking it...")
-        align_and_approach_target(
-            ep_chassis=ep_chassis,
-            ep_camera=ep_camera,
+        go_to_tower(
+            ep_robot=ep_robot,
             model=model,
-            tracker=tracker,
+            ep_camera=ep_camera,
+            ep_chassis=ep_chassis,
             conf_thresh=args.detect_conf,
             target_class=args.target_class,
-            expected_lateral_m=None,
-            tower_height_m=args.tower_height_m,
-            forbidden_center_world=tower2_current_world,
-            forbidden_radius_m=args.tower2_exclusion_radius_m,
+            stop_metric=args.stop_metric,
             desired_h_px=args.align_desired_h_px,
+            target_top_y_ratio=args.target_top_y_ratio,
             center_tol_px=args.align_center_tol_px,
             height_tol_px=args.align_height_tol_px,
+            top_y_tol_px=args.align_top_tol_px,
             k_forward=args.k_forward,
             k_lateral=args.k_lateral,
             lateral_sign=args.lateral_sign,
             max_v=args.max_v,
             step_s=args.servo_step_s,
+            pose_tracker=tracker,
+            selection_mode="center",
             show=args.show,
         )
         pick_up_tower(ep_robot=ep_robot)

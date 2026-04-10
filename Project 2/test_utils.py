@@ -5,6 +5,8 @@ from tower_utils import (
     DEFAULT_MODEL_PATH,
     DEFAULT_ROBOT_IP,
     DEFAULT_ROBOT_SN,
+    DEFAULT_STOP_METRIC,
+    DEFAULT_TARGET_TOP_Y_RATIO,
     connect_robot,
     go_to_tower,
     load_model,
@@ -50,6 +52,24 @@ def parse_args():
         choices=["360p", "720p"],
         help="Camera stream resolution used by go_to_tower().",
     )
+    parser.add_argument(
+        "--stop-metric",
+        default=DEFAULT_STOP_METRIC,
+        choices=["height", "top_y"],
+        help="Forward stop metric used by go_to_tower().",
+    )
+    parser.add_argument(
+        "--target-top-y-ratio",
+        type=float,
+        default=DEFAULT_TARGET_TOP_Y_RATIO,
+        help="Target top-of-bbox y ratio used when --stop-metric=top_y.",
+    )
+    parser.add_argument(
+        "--selection-mode",
+        default="center",
+        choices=["center", "conf"],
+        help="How go_to_tower() chooses among multiple visible towers.",
+    )
     return parser.parse_args()
 
 
@@ -79,6 +99,9 @@ def main():
                     model=model,
                     ep_camera=ep_camera,
                     conf_thresh=DEFAULT_DETECT_CONF,
+                    stop_metric=args.stop_metric,
+                    target_top_y_ratio=args.target_top_y_ratio,
+                    selection_mode=args.selection_mode,
                     show=True,
                 )
     finally:
