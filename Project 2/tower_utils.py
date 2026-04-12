@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty
+import math
 import time
 
 import robomaster
@@ -27,8 +28,10 @@ DEFAULT_ALIGN_HEIGHT_TOL_PX = 16.0
 DEFAULT_ALIGN_TOP_TOL_PX = 18.0
 DEFAULT_K_FORWARD = 0.0028
 DEFAULT_K_LATERAL = 0.0038
+DEFAULT_K_YAW = 0.12
 DEFAULT_LATERAL_SIGN = -1.0
 DEFAULT_MAX_V = 0.16
+DEFAULT_MAX_YAW_DPS = 45.0
 DEFAULT_SERVO_STEP_S = 0.12
 
 DEFAULT_ARM_X = 180
@@ -111,6 +114,12 @@ def select_detection(detections, selection_mode="conf", frame_center_x=None):
     if not detections:
         return None
 
+    if selection_mode == "leftmost":
+        return min(detections, key=lambda detection: (detection.cx, -detection.conf))
+
+    if selection_mode == "rightmost":
+        return max(detections, key=lambda detection: (detection.cx, detection.conf))
+
     if selection_mode == "center" and frame_center_x is not None:
         return min(detections, key=lambda detection: (abs(detection.cx - frame_center_x), -detection.conf))
 
@@ -132,8 +141,10 @@ def go_to_tower(
     top_y_tol_px=DEFAULT_ALIGN_TOP_TOL_PX,
     k_forward=DEFAULT_K_FORWARD,
     k_lateral=DEFAULT_K_LATERAL,
+    k_yaw=DEFAULT_K_YAW,
     lateral_sign=DEFAULT_LATERAL_SIGN,
     max_v=DEFAULT_MAX_V,
+    max_yaw_dps=DEFAULT_MAX_YAW_DPS,
     step_s=DEFAULT_SERVO_STEP_S,
     timeout_s=20.0,
     pose_tracker=None,
@@ -141,9 +152,9 @@ def go_to_tower(
     show=False,
 ):
     owns_camera = ep_camera is None
-    valid_stop_metrics = {"height", "top_y"}
+    valid_stop_metrics = {"top_y"}
     if stop_metric not in valid_stop_metrics:
-        raise ValueError(f"Unsupported stop_metric '{stop_metric}'. Use one of {sorted(valid_stop_metrics)}.")
+        raise ValueError(f"Unsupported stop_metric '{stop_metric}'. Use 'top_y'.")
 
     if ep_camera is None:
         ep_camera = ep_robot.camera
@@ -153,6 +164,7 @@ def go_to_tower(
         ep_chassis = ep_robot.chassis
 
     stable = 0
+    center_stable = 0
     selected = None
     t0 = time.time()
 
@@ -186,26 +198,33 @@ def go_to_tower(
                 selection_mode=selection_mode,
                 frame_center_x=frame_center_x,
             )
-            frame_height = frame.shape[0]
             y_top_px = selected.cy - selected.h / 2.0
             err_x_px = selected.cx - frame_center_x
 
-            if stop_metric == "height":
-                err_forward_px = desired_h_px - selected.h
-                forward_tol_px = height_tol_px
-                err_label = "err_h"
+            target_top_y_px = target_top_y_ratio * frame.shape[0]
+            err_forward_px = target_top_y_px - y_top_px
+            forward_tol_px = top_y_tol_px
+            err_label = "err_top"
+
+            centered = abs(err_x_px) <= center_tol_px
+            if centered:
+                center_stable += 1
             else:
-                target_top_y_px = target_top_y_ratio * frame_height
-                err_forward_px = target_top_y_px - y_top_px
-                forward_tol_px = top_y_tol_px
-                err_label = "err_top"
+                center_stable = 0
 
-            v_forward = clamp(k_forward * err_forward_px, -max_v, max_v)
-            v_lateral = clamp(lateral_sign * k_lateral * err_x_px, -max_v, max_v)
+            allow_forward = center_stable >= 2
 
-            ep_chassis.drive_speed(x=v_forward, y=v_lateral, z=0.0, timeout=step_s)
+            if not allow_forward:
+                v_forward = 0.0
+                v_yaw = clamp(-k_yaw * err_x_px, -max_yaw_dps, max_yaw_dps)
+            else:
+                v_forward = clamp(k_forward * err_forward_px, -max_v, max_v)
+                v_yaw = 0.0
+
+            ep_chassis.drive_speed(x=v_forward, y=0.0, z=v_yaw, timeout=step_s)
             if pose_tracker is not None:
-                pose_tracker.integrate(v_forward * step_s, v_lateral * step_s)
+                pose_tracker.integrate_turn(v_yaw * step_s)
+                pose_tracker.integrate_body_motion(v_forward * step_s, 0.0)
 
             if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= forward_tol_px:
                 stable += 1
@@ -222,7 +241,7 @@ def go_to_tower(
                 cv2.line(dbg, (int(frame_center_x), 0), (int(frame_center_x), dbg.shape[0] - 1), (0, 255, 255), 1)
                 cv2.putText(
                     dbg,
-                    f"err_x={err_x_px:+.1f}px {err_label}={err_forward_px:+.1f}px stable={stable}/4",
+                    f"err_x={err_x_px:+.1f}px yaw={v_yaw:+.1f}dps {err_label}={err_forward_px:+.1f}px center={center_stable} stable={stable}/4",
                     (10, 22),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
