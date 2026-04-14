@@ -16,7 +16,7 @@ from ultralytics import YOLO
 
 from robomaster import camera
 
-from tower_utils import DEFAULT_MODEL_PATH, DEFAULT_ROBOT_IP, DEFAULT_ROBOT_SN, connect_robot
+from tower_utils import DEFAULT_MODEL_PATH, DEFAULT_ROBOT_IP, DEFAULT_ROBOT_SN, connect_robot, move_arm_to_top
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,6 +79,7 @@ def main() -> None:
 
     ep_robot = connect_robot(conn_type=args.conn_type, robot_ip=args.robot_ip, sn=args.sn)
     ep_camera = ep_robot.camera
+    move_arm_to_top(ep_robot)
     ep_camera.start_video_stream(display=False, resolution=resolve_resolution(args.resolution))
 
     ratios = []
