@@ -2,9 +2,13 @@
 ultralytics
 opencv-python
 torch
+torchvision
+PyYAML
 
 # RoboMaster SDK
 robomaster
+netifaces
+netaddr
 
 # Scientific / plotting utilities used in Project 1 and examples
 numpy
