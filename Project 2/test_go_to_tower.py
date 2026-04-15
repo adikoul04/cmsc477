@@ -8,6 +8,7 @@ Use this script to tune visual-servo parameters before running the full swap flo
 """
 
 import argparse
+import time
 
 import cv2
 from ultralytics import YOLO
@@ -83,7 +84,7 @@ def main() -> None:
 
     ep_camera = ep_robot.camera
     ep_chassis = ep_robot.chassis
-    ep_camera.start_video_stream(display=False, resolution=resolve_resolution(args.resolution))
+    ep_camera.start_video_stream(display=True, resolution=resolve_resolution(args.resolution))
 
     stack = ActionStack()
 
@@ -116,6 +117,8 @@ def main() -> None:
             f"    Reached tower: conf={final_det.conf:.2f}, cx={final_det.cx:.1f}, cy={final_det.cy:.1f}"
         )
 
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[2] Picking up tower ...")
         pick_up_tower(ep_robot=ep_robot)
         print("\n✓ Pickup test complete.")
