@@ -25,7 +25,8 @@ from swap_and_place_2 import (
 from tower_utils import (
     DEFAULT_ALIGN_TOP_TOL_PX,
     DEFAULT_TARGET_TOP_Y_RATIO,
-    pick_up_tower,
+    pick_up_tower, 
+    move_arm_to_default,
 )
 
 
@@ -87,6 +88,9 @@ def main() -> None:
     stack = ActionStack()
 
     try:
+        move_arm_to_default(ep_robot)
+        ep_robot.gripper.open()
+
         print("[1] Approaching selected tower ...")
         final_det = go_to_tower_recorded(
             ep_robot=ep_robot,
