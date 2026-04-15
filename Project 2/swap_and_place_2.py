@@ -68,7 +68,7 @@ ROBOT_SN   = "3JKCH8800100RC"
 # ── Stash parameters ───────────────────────────────────────────────────────────
 STASH_YAW_DEG      = 90.0   # degrees to turn before driving to stash spot
 STASH_YAW_DPS      = 45.0   # yaw rate used for the stash turn (deg/s)
-STASH_FORWARD_M    = 0.35   # metres to drive forward to the stash spot
+STASH_FORWARD_M    = 0.2   # metres to drive forward to the stash spot
 STASH_FORWARD_MPS  = 0.15   # forward speed used while stashing (m/s)
 
 
@@ -555,6 +555,8 @@ def main() -> None:
         move_arm_to_default(ep_robot)
         ep_robot.gripper.open()
         # ── Step 1: Scan from home ─────────────────────────────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[1] Scanning for two towers from home ...")
         t1_det, t2_det = detect_stable_two_towers(
             ep_camera=ep_camera,
@@ -568,6 +570,8 @@ def main() -> None:
         t1_home_cx = t1_det.cx
 
         # ── Step 2: Go to T1, pick it up ──────────────────────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[2] Going to T1 (leftmost) ...")
         go_to_tower_recorded(
             ep_robot=ep_robot, model=model,
@@ -583,23 +587,33 @@ def main() -> None:
         pick_up_tower(ep_robot=ep_robot)
 
         # ── Step 3-4: Drive to stash spot, place T1 ───────────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[3] Driving to stash spot ...")
         stash_route: List[DriveAction] = drive_to_stash(ep_chassis, ep_robot=ep_robot)
         # Robot is now AT the stash spot holding T1.
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[4] Placing T1 at stash spot ...")
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
         time.sleep(0.3)
         place_down_tower(ep_robot=ep_robot)
 
         # ── Step 5: Reverse stash route → back at T1's original slot ──────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[5] Reversing stash route → back at T1's original (now empty) slot ...")
         reverse_route(ep_chassis, stash_route, ep_robot=ep_robot)
 
         # ── Step 6: Reverse route_to_t1 → back at home ────────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[6] Reversing route_to_t1 → back at home ...")
         reverse_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
 
         # ── Step 7-8: Go to T2, pick it up ────────────────────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[7] Going to T2 (rightmost) ...")
         go_to_tower_recorded(
             ep_robot=ep_robot, model=model,
@@ -614,23 +628,33 @@ def main() -> None:
         pick_up_tower(ep_robot=ep_robot)
 
         # ── Step 9: Reverse route_to_t2 → back at home ────────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[9] Reversing route_to_t2 → back at home ...")
         stack.unwind(ep_chassis, ep_robot=ep_robot)
 
         # ── Step 10-11: Replay route_to_t1, place T2 at T1's original slot
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[10] Replaying route_to_t1 → arriving at T1's original slot ...")
         replay_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[11] Placing T2 at T1's original slot ...")
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
         time.sleep(0.3)
         place_down_tower(ep_robot=ep_robot)
 
         # ── Step 12: Reverse route_to_t1 → back at home ───────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[12] Reversing route_to_t1 → back at home ...")
         reverse_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
 
         # ── Step 13: Rescan — find stashed T1, excluding T2's column ──────
         # T2 now sits where T1 was, so suppress detections near t1_home_cx.
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[13] Rescanning for stashed T1 (excluding T2 at T1's original column) ...")
         t1_hint = detect_single_tower_excluding(
             ep_camera=ep_camera,
@@ -643,6 +667,8 @@ def main() -> None:
         )
 
         # ── Step 14-15: Go to stashed T1, pick it up ──────────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print(f"[14] Going to stashed T1 (hint='{t1_hint}') ...")
         go_to_tower_recorded(
             ep_robot=ep_robot, model=model,
@@ -656,10 +682,14 @@ def main() -> None:
         pick_up_tower(ep_robot=ep_robot)
 
         # ── Step 16: Reverse route_to_stash → back at home ────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[16] Reversing route_to_stash → back at home ...")
         stack.unwind(ep_chassis, ep_robot=ep_robot)
 
         # ── Step 17-18: Replay route_to_t2, place T1 at T2's original slot
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[17] Replaying route_to_t2 → arriving at T2's original slot ...")
         replay_route(ep_chassis, route_to_t2, ep_robot=ep_robot)
         print("[18] Placing T1 at T2's original slot ...")
@@ -668,6 +698,8 @@ def main() -> None:
         place_down_tower(ep_robot=ep_robot)
 
         # ── Step 19: Reverse route_to_t2 → back at home ───────────────────
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         print("[19] Reversing route_to_t2 → back at home ...")
         reverse_route(ep_chassis, route_to_t2, ep_robot=ep_robot)
 
