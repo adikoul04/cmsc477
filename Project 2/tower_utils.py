@@ -22,7 +22,7 @@ DEFAULT_MODEL_PATH = r"C:\Users\dutta\Documents\cmsc477\runs\detect\train5\weigh
 DEFAULT_DETECT_CONF = 0.45
 DEFAULT_STOP_METRIC = "top_y"
 DEFAULT_DESIRED_H_PX = 170.0
-DEFAULT_TARGET_TOP_Y_RATIO = 0.72
+DEFAULT_TARGET_TOP_Y_RATIO = 0.67
 DEFAULT_ALIGN_CENTER_TOL_PX = 24.0
 DEFAULT_ALIGN_HEIGHT_TOL_PX = 16.0
 DEFAULT_ALIGN_TOP_TOL_PX = 18.0
@@ -304,7 +304,7 @@ def pick_up_tower(
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
 
-        move_arm_to_top(ep_robot, arm_x=arm_x, raised_y=raised_y)
+        move_arm_to_default(ep_robot, arm_x=arm_x, raised_y=raised_y)
         ep_arm.moveto(x=arm_x, y=approach_y).wait_for_completed()
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
 
@@ -349,7 +349,7 @@ def place_down_tower(
         ep_gripper.pause()
 
         ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
-        move_arm_to_top(ep_robot, arm_x=arm_x, raised_y=raised_y)
+        move_arm_to_default(ep_robot, arm_x=arm_x, raised_y=raised_y)
         return ep_robot
     finally:
         if owns_robot:
