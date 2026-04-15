@@ -552,6 +552,8 @@ def main() -> None:
     stack = ActionStack()
 
     try:
+        move_arm_to_default(ep_robot)
+        ep_robot.gripper.open()
         # ── Step 1: Scan from home ─────────────────────────────────────────
         print("[1] Scanning for two towers from home ...")
         t1_det, t2_det = detect_stable_two_towers(
@@ -575,6 +577,9 @@ def main() -> None:
         )
         route_to_t1: List[DriveAction] = stack.snapshot()
         print("    Picking up T1 ...")
+
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         pick_up_tower(ep_robot=ep_robot)
 
         # ── Step 3-4: Drive to stash spot, place T1 ───────────────────────
@@ -582,6 +587,8 @@ def main() -> None:
         stash_route: List[DriveAction] = drive_to_stash(ep_chassis, ep_robot=ep_robot)
         # Robot is now AT the stash spot holding T1.
         print("[4] Placing T1 at stash spot ...")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         place_down_tower(ep_robot=ep_robot)
 
         # ── Step 5: Reverse stash route → back at T1's original slot ──────
@@ -602,6 +609,8 @@ def main() -> None:
         )
         route_to_t2: List[DriveAction] = stack.snapshot()
         print("    Picking up T2 ...")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         pick_up_tower(ep_robot=ep_robot)
 
         # ── Step 9: Reverse route_to_t2 → back at home ────────────────────
@@ -612,6 +621,8 @@ def main() -> None:
         print("[10] Replaying route_to_t1 → arriving at T1's original slot ...")
         replay_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
         print("[11] Placing T2 at T1's original slot ...")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         place_down_tower(ep_robot=ep_robot)
 
         # ── Step 12: Reverse route_to_t1 → back at home ───────────────────
@@ -640,6 +651,8 @@ def main() -> None:
             **servo_kwargs,
         )
         print("     Picking up T1 ...")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         pick_up_tower(ep_robot=ep_robot)
 
         # ── Step 16: Reverse route_to_stash → back at home ────────────────
@@ -650,6 +663,8 @@ def main() -> None:
         print("[17] Replaying route_to_t2 → arriving at T2's original slot ...")
         replay_route(ep_chassis, route_to_t2, ep_robot=ep_robot)
         print("[18] Placing T1 at T2's original slot ...")
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.2)
+        time.sleep(0.3)
         place_down_tower(ep_robot=ep_robot)
 
         # ── Step 19: Reverse route_to_t2 → back at home ───────────────────
