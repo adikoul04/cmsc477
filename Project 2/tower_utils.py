@@ -304,7 +304,7 @@ def pick_up_tower(
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
 
-        move_arm_to_default(ep_robot, arm_x=arm_x, raised_y=raised_y)
+        move_arm_to_default(ep_robot)
         ep_arm.moveto(x=arm_x, y=approach_y).wait_for_completed()
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
 
@@ -340,7 +340,6 @@ def place_down_tower(
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
 
-        move_arm_to_top(ep_robot, arm_x=arm_x, raised_y=raised_y)
         ep_arm.moveto(x=arm_x, y=approach_y).wait_for_completed()
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
 
@@ -348,8 +347,7 @@ def place_down_tower(
         time.sleep(grip_wait_seconds)
         ep_gripper.pause()
 
-        ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
-        move_arm_to_default(ep_robot, arm_x=arm_x, raised_y=raised_y)
+        move_arm_to_default(ep_robot)
         return ep_robot
     finally:
         if owns_robot:
