@@ -10,24 +10,26 @@ U-turn is required – the reversed commands drive it straight back.
 
 High-level sequence
 ───────────────────
-1.  Scan: detect two towers from home; record which is left / right.
-2.  Go to Tower 1 (leftmost), recording every drive command on stack_t1.
-3.  Pick up Tower 1; snapshot stack_t1 as route_to_t1.
-4.  STASH Tower 1: turn 90°, drive forward, place Tower 1 down, then
-    reverse those actions to return to Tower 1's original slot (now empty).
-5.  Unwind stack_t1 → robot returns to home.
-6.  Go to Tower 2 (rightmost), recording every drive command on stack_t2.
-7.  Pick up Tower 2; snapshot stack_t2 as route_to_t2.
-8.  Replay route_to_t1 → robot arrives at Tower 1's original (now empty) slot.
-9.  Place Tower 2 down (Tower 2 is now at Tower 1's original slot).
-10. Unwind stack_t1 → robot returns to home.
-11. Scan for Tower 1 (ignoring the tower just placed at T1-slot).
-12. Go to Tower 1's stash location, recording every drive command.
-13. Pick up Tower 1.
-14. Unwind stash stack → robot returns to home.
-15. Replay route_to_t2 → robot arrives at Tower 2's original slot.
-16. Place Tower 1 down (Tower 1 is now at Tower 2's original slot).
-17. Unwind stack_t2 → robot returns to home.
+ 1.  Scan from home: detect two towers, record left (T1) and right (T2).
+ 2.  Go to T1 (leftmost), recording route_to_t1.
+ 3.  Pick up T1.
+ 4.  Drive to stash spot (turn 90°, drive forward), recording stash_route.
+ 5.  Place T1 at stash spot.
+ 6.  Reverse stash_route → back at T1's original (now empty) slot.
+ 7.  Reverse route_to_t1 → back at home.
+ 8.  Go to T2 (rightmost), recording route_to_t2.
+ 9.  Pick up T2.
+10.  Reverse route_to_t2 → back at home.
+11.  Replay route_to_t1 → arrive at T1's original (empty) slot.
+12.  Place T2 down (T2 is now at T1's original slot).
+13.  Reverse route_to_t1 → back at home.
+14.  Rescan: find T1 at stash spot (exclude T2's column).
+15.  Go to stashed T1, recording route_to_stash.
+16.  Pick up T1.
+17.  Reverse route_to_stash → back at home.
+18.  Replay route_to_t2 → arrive at T2's original slot.
+19.  Place T1 down (T1 is now at T2's original slot).
+20.  Reverse route_to_t2 → back at home.
 """
 
 import argparse
@@ -57,23 +59,21 @@ from tower_utils import (
     move_arm_to_top,
 )
 
-# ── Model / robot constants (calibrated from bounding_box_capture.py) ─────────
+# ── Model / robot constants ────────────────────────────────────────────────────
 MODEL_PATH = r"C:\Users\dutta\Documents\cmsc477\runs\detect\train5\weights\best.pt"
 ROBOT_IP   = "192.168.50.117"
 ROBOT_SN   = "3JKCH8800100RC"
 
-# ──────────────────────────────────────────────
-# Stash parameters
-# ──────────────────────────────────────────────
+# ── Stash parameters ───────────────────────────────────────────────────────────
 STASH_YAW_DEG      = 90.0   # degrees to turn before driving to stash spot
 STASH_YAW_DPS      = 45.0   # yaw rate used for the stash turn (deg/s)
 STASH_FORWARD_M    = 0.35   # metres to drive forward to the stash spot
 STASH_FORWARD_MPS  = 0.15   # forward speed used while stashing (m/s)
 
 
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # Action stack
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class DriveAction:
@@ -97,7 +97,7 @@ class ActionStack:
         self._stack.clear()
 
     def snapshot(self) -> List[DriveAction]:
-        """Return an ordered copy (home → tower) for later forward replay."""
+        """Return an ordered copy (start → destination) for later forward replay."""
         return list(self._stack)
 
     def unwind(self, ep_chassis, ep_robot=None, pause_s: float = 0.05) -> None:
@@ -158,23 +158,18 @@ def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: 
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
 
 
-# ──────────────────────────────────────────────
-# Stash / un-stash helpers
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Stash helper
+# ──────────────────────────────────────────────────────────────────────────────
 
-def stash_tower(ep_chassis, ep_robot=None) -> List[DriveAction]:
-    """Turn 90°, drive forward, place the held tower, then undo both moves.
+def drive_to_stash(ep_chassis, ep_robot=None) -> List[DriveAction]:
+    """Turn 90° LEFT then drive forward to the stash spot.
 
-    The robot ends up back at the exact spot it started (Tower 1's original
-    slot), which is now empty.  Returns the stash route so the caller can
-    re-use it later to visit the stash location again if needed.
+    The robot stops AT the stash spot with the tower still in the gripper.
+    The caller is responsible for calling place_down_tower() before reversing.
 
-    Route built:
-        1. Yaw LEFT by STASH_YAW_DEG in place
-        2. Drive forward STASH_FORWARD_M
-        [place_down_tower is called by the caller between steps 2 and 3]
-        3. Drive backward STASH_FORWARD_M   (reverse of step 2)
-        4. Yaw RIGHT by STASH_YAW_DEG      (reverse of step 1)
+    Returns stash_route (the two actions taken) so the caller can reverse them
+    to get back to T1's original slot.
     """
     stash_route: List[DriveAction] = []
     pause_s = 0.05
@@ -182,16 +177,16 @@ def stash_tower(ep_chassis, ep_robot=None) -> List[DriveAction]:
     if ep_robot is not None:
         move_arm_to_top(ep_robot)
 
-    # ── 1. Yaw 90° LEFT ───────────────────────────────────────────────────
-    yaw_dt = STASH_YAW_DEG / STASH_YAW_DPS          # seconds needed for the turn
+    # 1. Yaw 90° LEFT
+    yaw_dt = STASH_YAW_DEG / STASH_YAW_DPS
     left_yaw_dps = -abs(STASH_YAW_DPS)
     yaw_action = DriveAction(vx=0.0, vy=0.0, vz=left_yaw_dps, dt=yaw_dt)
     ep_chassis.drive_speed(x=0.0, y=0.0, z=left_yaw_dps, timeout=yaw_dt)
     time.sleep(yaw_dt + pause_s)
     stash_route.append(yaw_action)
 
-    # ── 2. Drive forward to stash spot ────────────────────────────────────
-    fwd_dt = STASH_FORWARD_M / STASH_FORWARD_MPS     # seconds needed to cover distance
+    # 2. Drive forward to stash spot
+    fwd_dt = STASH_FORWARD_M / STASH_FORWARD_MPS
     fwd_action = DriveAction(vx=STASH_FORWARD_MPS, vy=0.0, vz=0.0, dt=fwd_dt)
     ep_chassis.drive_speed(x=STASH_FORWARD_MPS, y=0.0, z=0.0, timeout=fwd_dt)
     time.sleep(fwd_dt + pause_s)
@@ -200,18 +195,14 @@ def stash_tower(ep_chassis, ep_robot=None) -> List[DriveAction]:
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
     time.sleep(0.15)
 
-    # Caller places the tower here (see main sequence).
+    # Robot is now at the stash spot. Caller places the tower, then calls
+    # reverse_route(ep_chassis, stash_route) to return to T1's original slot.
     return stash_route
 
 
-def return_from_stash(ep_chassis, stash_route: List[DriveAction], ep_robot=None) -> None:
-    """Reverse the stash route to return to Tower 1's original (now empty) slot."""
-    reverse_route(ep_chassis, stash_route, ep_robot=ep_robot)
-
-
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # Visual-servo go_to_tower with stack recording
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 def go_to_tower_recorded(
     ep_robot,
@@ -233,12 +224,12 @@ def go_to_tower_recorded(
     selection_mode: str = "conf",
     show: bool = False,
 ) -> Detection:
-    """Drive toward a tower using visual servoing.
+    """Drive toward a tower using visual servoing, recording every drive command.
 
-    Every ``drive_speed`` command is pushed onto *action_stack* so the
-    caller can later unwind (return home) or replay (re-visit) the route.
+    Every ``drive_speed`` command is pushed onto *action_stack* so the caller
+    can later unwind (return to start) or snapshot+replay (re-visit the spot).
 
-    Returns the final Detection used to stop.
+    Returns the final Detection used to declare arrival.
     """
     action_stack.clear()
     move_arm_to_top(ep_robot)
@@ -264,6 +255,7 @@ def go_to_tower_recorded(
 
         detections = get_detections(model, frame, conf_thresh, target_class)
         if not detections:
+            # Hold still but record the idle action so unwind stays accurate.
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
             action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
             continue
@@ -334,9 +326,9 @@ def go_to_tower_recorded(
     raise RuntimeError("go_to_tower_recorded exited loop unexpectedly.")
 
 
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # Initial two-tower scan
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 def detect_stable_two_towers(
     ep_camera,
@@ -347,7 +339,7 @@ def detect_stable_two_towers(
     timeout_s: float = 25.0,
     show: bool = False,
 ) -> Tuple[Detection, Detection]:
-    """Block until two towers are detected in several consecutive frames.
+    """Block until two towers are confidently detected in several consecutive frames.
 
     Returns (left_tower, right_tower) sorted by image x-coordinate.
     """
@@ -424,7 +416,7 @@ def detect_single_tower_excluding(
 
     while True:
         if time.time() - t0 > timeout_s:
-            raise TimeoutError("Timed out searching for stashed tower 1.")
+            raise TimeoutError("Timed out searching for stashed Tower 1.")
 
         try:
             frame = ep_camera.read_cv2_image(strategy="newest", timeout=2.0)
@@ -471,12 +463,12 @@ def detect_single_tower_excluding(
             return hint
 
 
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # CLI
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Swap two LEGO towers with action-stack homing")
+    parser = argparse.ArgumentParser(description="Swap two towers with action-stack homing")
     parser.add_argument("--model-path", default=MODEL_PATH)
     parser.add_argument("--conn-type", default="sta", choices=["sta", "ap"])
     parser.add_argument("--robot-ip", default=ROBOT_IP)
@@ -508,18 +500,16 @@ def resolve_resolution(name: str):
     return camera.STREAM_360P
 
 
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 # Main
-# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     args = parse_args()
 
-    # ── Load model (path calibrated from bounding_box_capture.py) ─────────
     print("Loading model ...")
     model = YOLO(args.model_path)
 
-    # ── Connect robot (conn_type / SN calibrated from bounding_box_capture.py)
     if args.conn_type == "sta":
         robomaster.config.ROBOT_IP_STR = args.robot_ip
 
@@ -530,13 +520,10 @@ def main() -> None:
 
     ep_camera.start_video_stream(display=False, resolution=resolve_resolution(args.resolution))
 
-    # Update module-level stash constants from CLI args so stash_tower() picks
-    # them up even though it reads the globals directly.
     global STASH_YAW_DEG, STASH_FORWARD_M
     STASH_YAW_DEG   = args.stash_yaw_deg
     STASH_FORWARD_M = args.stash_forward_m
 
-    # Shared servo kwargs forwarded to every go_to_tower_recorded call.
     servo_kwargs = dict(
         target_class=args.target_class,
         conf_thresh=args.detect_conf,
@@ -551,11 +538,11 @@ def main() -> None:
         show=args.show,
     )
 
-    stack = ActionStack()   # live recording stack (reused per leg)
+    stack = ActionStack()
 
     try:
-        # ── Step 1: Initial scan ───────────────────────────────────────────
-        print("[1/9] Scanning for two towers from home position ...")
+        # ── Step 1: Scan from home ─────────────────────────────────────────
+        print("[1] Scanning for two towers from home ...")
         t1_det, t2_det = detect_stable_two_towers(
             ep_camera=ep_camera,
             model=model,
@@ -563,68 +550,67 @@ def main() -> None:
             target_class=args.target_class,
             show=args.show,
         )
-        t1_home_cx = t1_det.cx   # leftmost
+        # t1_det.cx is T1's pixel column at home — used later to exclude it
+        # when searching for the stashed T1 after T2 has been placed there.
+        t1_home_cx = t1_det.cx
 
-        # ── Step 2: Go to Tower 1, pick it up ─────────────────────────────
-        print("[2/9] Going to Tower 1 (leftmost) ...")
+        # ── Step 2: Go to T1, pick it up ──────────────────────────────────
+        print("[2] Going to T1 (leftmost) ...")
         go_to_tower_recorded(
-            ep_robot=ep_robot,
-            model=model,
-            ep_camera=ep_camera,
-            ep_chassis=ep_chassis,
-            action_stack=stack,
-            selection_mode="leftmost",
+            ep_robot=ep_robot, model=model,
+            ep_camera=ep_camera, ep_chassis=ep_chassis,
+            action_stack=stack, selection_mode="leftmost",
             **servo_kwargs,
         )
-        route_to_t1: List[DriveAction] = stack.snapshot()   # save home→T1 route
-        print("       Picking up Tower 1 ...")
+        route_to_t1: List[DriveAction] = stack.snapshot()
+        print("    Picking up T1 ...")
         pick_up_tower(ep_robot=ep_robot)
 
-        # ── Step 3: STASH Tower 1 off to the side ─────────────────────────
-        # Turn 90°, drive forward, place Tower 1 at the stash spot, then
-        # reverse back to Tower 1's original (now empty) slot.
-        print("[3/9] Stashing Tower 1 (turn 90°, drive forward, place, return) ...")
-        stash_route: List[DriveAction] = stash_tower(ep_chassis, ep_robot=ep_robot)
-        print("       Placing Tower 1 at stash spot ...")
-        place_down_tower(ep_robot=ep_robot)
-        print("       Returning to Tower 1's original slot ...")
-        return_from_stash(ep_chassis, stash_route, ep_robot=ep_robot)
-        # Robot is now at Tower 1's original, empty slot.
-
-        # ── Step 4: Return home by unwinding stack_t1 ─────────────────────
-        print("[4/9] Returning home (unwind route_to_t1) ...")
-        stack.unwind(ep_chassis, ep_robot=ep_robot)
-        # stack is now empty; ready for next recording.
-
-        # ── Step 5: Go to Tower 2, pick it up ─────────────────────────────
-        print("[5/9] Going to Tower 2 (rightmost) ...")
-        go_to_tower_recorded(
-            ep_robot=ep_robot,
-            model=model,
-            ep_camera=ep_camera,
-            ep_chassis=ep_chassis,
-            action_stack=stack,
-            selection_mode="rightmost",
-            **servo_kwargs,
-        )
-        route_to_t2: List[DriveAction] = stack.snapshot()   # save home→T2 route
-        print("       Picking up Tower 2 ...")
-        pick_up_tower(ep_robot=ep_robot)
-
-        # ── Step 6: Drive to T1's original (now empty) slot; place Tower 2 ─
-        print("[6/9] Unwinding to home; replaying route to T1 slot; placing Tower 2 ...")
-        stack.unwind(ep_chassis, ep_robot=ep_robot)         # back to home from T2
-        replay_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
-        print("       Placing Tower 2 at Tower 1's original slot ...")
+        # ── Step 3-4: Drive to stash spot, place T1 ───────────────────────
+        print("[3] Driving to stash spot ...")
+        stash_route: List[DriveAction] = drive_to_stash(ep_chassis, ep_robot=ep_robot)
+        # Robot is now AT the stash spot holding T1.
+        print("[4] Placing T1 at stash spot ...")
         place_down_tower(ep_robot=ep_robot)
 
-        # ── Step 7: Return home; rescan for stashed Tower 1 ───────────────
-        print("[7/9] Returning home (reverse route_to_t1); rescanning for Tower 1 ...")
+        # ── Step 5: Reverse stash route → back at T1's original slot ──────
+        print("[5] Reversing stash route → back at T1's original (now empty) slot ...")
+        reverse_route(ep_chassis, stash_route, ep_robot=ep_robot)
+
+        # ── Step 6: Reverse route_to_t1 → back at home ────────────────────
+        print("[6] Reversing route_to_t1 → back at home ...")
         reverse_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
 
-        # Tower 2 now occupies what was Tower 1's column at home view, so
-        # exclude that column when searching for the stashed Tower 1.
-        hint = detect_single_tower_excluding(
+        # ── Step 7-8: Go to T2, pick it up ────────────────────────────────
+        print("[7] Going to T2 (rightmost) ...")
+        go_to_tower_recorded(
+            ep_robot=ep_robot, model=model,
+            ep_camera=ep_camera, ep_chassis=ep_chassis,
+            action_stack=stack, selection_mode="rightmost",
+            **servo_kwargs,
+        )
+        route_to_t2: List[DriveAction] = stack.snapshot()
+        print("    Picking up T2 ...")
+        pick_up_tower(ep_robot=ep_robot)
+
+        # ── Step 9: Reverse route_to_t2 → back at home ────────────────────
+        print("[9] Reversing route_to_t2 → back at home ...")
+        stack.unwind(ep_chassis, ep_robot=ep_robot)
+
+        # ── Step 10-11: Replay route_to_t1, place T2 at T1's original slot
+        print("[10] Replaying route_to_t1 → arriving at T1's original slot ...")
+        replay_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
+        print("[11] Placing T2 at T1's original slot ...")
+        place_down_tower(ep_robot=ep_robot)
+
+        # ── Step 12: Reverse route_to_t1 → back at home ───────────────────
+        print("[12] Reversing route_to_t1 → back at home ...")
+        reverse_route(ep_chassis, route_to_t1, ep_robot=ep_robot)
+
+        # ── Step 13: Rescan — find stashed T1, excluding T2's column ──────
+        # T2 now sits where T1 was, so suppress detections near t1_home_cx.
+        print("[13] Rescanning for stashed T1 (excluding T2 at T1's original column) ...")
+        t1_hint = detect_single_tower_excluding(
             ep_camera=ep_camera,
             model=model,
             conf_thresh=args.detect_conf,
@@ -634,32 +620,32 @@ def main() -> None:
             show=args.show,
         )
 
-        # ── Step 8: Go to stashed Tower 1, pick it up ─────────────────────
-        print(f"[8/9] Going to stashed Tower 1 (hint='{hint}') ...")
+        # ── Step 14-15: Go to stashed T1, pick it up ──────────────────────
+        print(f"[14] Going to stashed T1 (hint='{t1_hint}') ...")
         go_to_tower_recorded(
-            ep_robot=ep_robot,
-            model=model,
-            ep_camera=ep_camera,
-            ep_chassis=ep_chassis,
-            action_stack=stack,
-            selection_mode=hint,
+            ep_robot=ep_robot, model=model,
+            ep_camera=ep_camera, ep_chassis=ep_chassis,
+            action_stack=stack, selection_mode=t1_hint,
             **servo_kwargs,
         )
-        print("       Picking up Tower 1 ...")
+        print("     Picking up T1 ...")
         pick_up_tower(ep_robot=ep_robot)
 
-        # ── Step 9: Drive to T2's original slot; place Tower 1 ────────────
-        print("[9/9] Unwinding to home; replaying route to T2 slot; placing Tower 1 ...")
-        stack.unwind(ep_chassis, ep_robot=ep_robot)             # back to home from stash
+        # ── Step 16: Reverse route_to_stash → back at home ────────────────
+        print("[16] Reversing route_to_stash → back at home ...")
+        stack.unwind(ep_chassis, ep_robot=ep_robot)
+
+        # ── Step 17-18: Replay route_to_t2, place T1 at T2's original slot
+        print("[17] Replaying route_to_t2 → arriving at T2's original slot ...")
         replay_route(ep_chassis, route_to_t2, ep_robot=ep_robot)
-        print("       Placing Tower 1 at Tower 2's original slot ...")
+        print("[18] Placing T1 at T2's original slot ...")
         place_down_tower(ep_robot=ep_robot)
 
-        # ── Final: return home ─────────────────────────────────────────────
-        print("Returning home ...")
+        # ── Step 19: Reverse route_to_t2 → back at home ───────────────────
+        print("[19] Reversing route_to_t2 → back at home ...")
         reverse_route(ep_chassis, route_to_t2, ep_robot=ep_robot)
 
-        print("\n✓ Swap-and-place sequence complete.")
+        print("\n✓ Swap complete. T1 is at T2's original slot; T2 is at T1's original slot.")
 
     except (KeyboardInterrupt, TimeoutError, RuntimeError) as exc:
         print(f"\n[ERROR] {exc}")
