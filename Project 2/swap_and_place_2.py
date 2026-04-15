@@ -70,6 +70,13 @@ STASH_YAW_DEG      = 90.0   # degrees to turn before driving to stash spot
 STASH_YAW_DPS      = 45.0   # yaw rate used for the stash turn (deg/s)
 STASH_FORWARD_M    = 0.2   # metres to drive forward to the stash spot
 STASH_FORWARD_MPS  = 0.15   # forward speed used while stashing (m/s)
+DEFAULT_STOP_TIMEOUT_S = 0.2
+DEFAULT_STOP_SETTLE_S = 0.15
+
+# Watchdog timeout passed to drive_speed during reversal/replay.
+# Must be larger than any single action's dt so the SDK never auto-cancels
+# a command before time.sleep finishes.
+_WATCHDOG_S = 2.0
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -82,7 +89,7 @@ class DriveAction:
     vx: float   # forward speed (m/s)
     vy: float   # lateral speed (m/s)
     vz: float   # yaw rate   (deg/s)
-    dt: float   # duration   (s)
+    dt: float   # ACTUAL wall-clock duration (s) measured at record time
 
 
 class ActionStack:
@@ -101,7 +108,7 @@ class ActionStack:
         """Return an ordered copy (start → destination) for later forward replay."""
         return list(self._stack)
 
-    def unwind(self, ep_chassis, ep_robot=None, pause_s: float = 0.05) -> None:
+    def unwind(self, ep_chassis, ep_robot=None) -> None:
         """Reverse every recorded action to drive back to where recording started."""
         if ep_robot is not None:
             move_arm_to_default(ep_robot)
@@ -111,25 +118,31 @@ class ActionStack:
                 x=-action.vx,
                 y=-action.vy,
                 z=-action.vz,
-                timeout=action.dt,
+                timeout=_WATCHDOG_S,
             )
-            time.sleep(action.dt + pause_s)
-        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+            time.sleep(action.dt)
+        stop_chassis(ep_chassis)
 
-    def replay(self, ep_chassis, pause_s: float = 0.05) -> None:
+    def replay(self, ep_chassis) -> None:
         """Replay actions in forward order (re-travel a previously recorded route)."""
         for action in self._stack:
             ep_chassis.drive_speed(
                 x=action.vx,
                 y=action.vy,
                 z=action.vz,
-                timeout=action.dt,
+                timeout=_WATCHDOG_S,
             )
-            time.sleep(action.dt + pause_s)
-        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+            time.sleep(action.dt)
+        stop_chassis(ep_chassis)
 
 
-def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
+def stop_chassis(ep_chassis, timeout_s: float = DEFAULT_STOP_TIMEOUT_S, settle_s: float = DEFAULT_STOP_SETTLE_S) -> None:
+    """Send a zero-speed command and wait for the chassis to settle."""
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=timeout_s)
+    time.sleep(timeout_s + settle_s)
+
+
+def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None) -> None:
     """Replay a snapshot (list) of actions in forward order."""
     if ep_robot is not None:
         move_arm_to_default(ep_robot)
@@ -138,13 +151,13 @@ def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: f
             x=action.vx,
             y=action.vy,
             z=action.vz,
-            timeout=action.dt,
+            timeout=_WATCHDOG_S,
         )
-        time.sleep(action.dt + pause_s)
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+        time.sleep(action.dt)
+    stop_chassis(ep_chassis)
 
 
-def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
+def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None) -> None:
     """Replay a snapshot in reverse order with negated velocities."""
     if ep_robot is not None:
         move_arm_to_default(ep_robot)
@@ -153,10 +166,10 @@ def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: 
             x=-action.vx,
             y=-action.vy,
             z=-action.vz,
-            timeout=action.dt,
+            timeout=_WATCHDOG_S,
         )
-        time.sleep(action.dt + pause_s)
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+        time.sleep(action.dt)
+    stop_chassis(ep_chassis)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -171,30 +184,33 @@ def drive_to_stash(ep_chassis, ep_robot=None) -> List[DriveAction]:
 
     Returns stash_route (the two actions taken) so the caller can reverse them
     to get back to T1's original slot.
+
+    dt in each DriveAction is the actual wall-clock time measured, so
+    reverse_route will drive for exactly the same duration in reverse.
     """
     stash_route: List[DriveAction] = []
-    pause_s = 0.05
 
     if ep_robot is not None:
         move_arm_to_default(ep_robot)
 
-    # 1. Yaw 90° LEFT
+    # 1. Yaw 90° LEFT — measure actual elapsed time
     yaw_dt = STASH_YAW_DEG / STASH_YAW_DPS
     left_yaw_dps = -abs(STASH_YAW_DPS)
-    yaw_action = DriveAction(vx=0.0, vy=0.0, vz=left_yaw_dps, dt=yaw_dt)
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=left_yaw_dps, timeout=yaw_dt)
-    time.sleep(yaw_dt + pause_s)
-    stash_route.append(yaw_action)
+    t_start = time.time()
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=left_yaw_dps, timeout=_WATCHDOG_S)
+    time.sleep(yaw_dt)
+    actual_yaw_dt = time.time() - t_start
+    stash_route.append(DriveAction(vx=0.0, vy=0.0, vz=left_yaw_dps, dt=actual_yaw_dt))
 
-    # 2. Drive forward to stash spot
+    # 2. Drive forward to stash spot — measure actual elapsed time
     fwd_dt = STASH_FORWARD_M / STASH_FORWARD_MPS
-    fwd_action = DriveAction(vx=STASH_FORWARD_MPS, vy=0.0, vz=0.0, dt=fwd_dt)
-    ep_chassis.drive_speed(x=STASH_FORWARD_MPS, y=0.0, z=0.0, timeout=fwd_dt)
-    time.sleep(fwd_dt + pause_s)
-    stash_route.append(fwd_action)
+    t_start = time.time()
+    ep_chassis.drive_speed(x=STASH_FORWARD_MPS, y=0.0, z=0.0, timeout=_WATCHDOG_S)
+    time.sleep(fwd_dt)
+    actual_fwd_dt = time.time() - t_start
+    stash_route.append(DriveAction(vx=STASH_FORWARD_MPS, vy=0.0, vz=0.0, dt=actual_fwd_dt))
 
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
-    time.sleep(0.15)
+    stop_chassis(ep_chassis)
 
     # Robot is now at the stash spot. Caller places the tower, then calls
     # reverse_route(ep_chassis, stash_route) to return to T1's original slot.
@@ -227,8 +243,14 @@ def go_to_tower_recorded(
 ) -> Detection:
     """Drive toward a tower using visual servoing, recording every drive command.
 
-    Every ``drive_speed`` command is pushed onto *action_stack* so the caller
-    can later unwind (return to start) or snapshot+replay (re-visit the spot).
+    Every drive_speed command is pushed onto action_stack with the actual
+    wall-clock dt measured by time.time(), so unwind/reverse_route will
+    run each reversed command for exactly the same duration and the robot
+    returns precisely to its starting position.
+
+    Zero-velocity idle steps (no detection) and the final stop are NOT
+    recorded — they carry no displacement so they would only add dead time
+    during reversal.
 
     Returns the final Detection used to declare arrival.
     """
@@ -241,9 +263,7 @@ def go_to_tower_recorded(
     selected: Optional[Detection] = None
 
     while True:
-        # if time.time() - t0 > timeout_s:
-        #     raise TimeoutError("Timed out while approaching tower.")
-
+        # ── grab the newest frame ──────────────────────────────────────────
         try:
             frame = ep_camera.read_cv2_image(strategy="newest", timeout=2.0)
         except Empty:
@@ -256,9 +276,10 @@ def go_to_tower_recorded(
 
         detections = get_detections(model, frame, conf_thresh, target_class)
         if not detections:
-            # Hold still but record the idle action so unwind stays accurate.
+            # Hold still. Do NOT record — zero velocity has no displacement
+            # to undo, and recording it would add dead time during reversal.
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
-            action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
+            time.sleep(step_s)
             continue
 
         frame_w = frame.shape[1]
@@ -286,14 +307,22 @@ def go_to_tower_recorded(
 
         if not allow_forward:
             vx = 0.0
-            # Reverse yaw sign so left-side detections produce the correct turn direction
             vz = clamp(k_yaw * err_x_px, -max_yaw_dps, max_yaw_dps)
         else:
             vx = clamp(k_forward * err_forward_px, -max_v, max_v)
             vz = 0.0
 
-        ep_chassis.drive_speed(x=vx, y=0.0, z=vz, timeout=step_s)
-        action_stack.push(DriveAction(vx=vx, vy=0.0, vz=vz, dt=step_s))
+        # ── issue command and measure actual wall-clock duration ───────────
+        # We use time.time() around the sleep so dt captures the real time
+        # the robot spent executing this velocity, including any scheduling
+        # jitter.  The watchdog timeout is set large (_WATCHDOG_S) so the
+        # SDK never cancels the command before our sleep finishes.
+        t_step = time.time()
+        ep_chassis.drive_speed(x=vx, y=0.0, z=vz, timeout=_WATCHDOG_S)
+        time.sleep(step_s)
+        actual_dt = time.time() - t_step
+
+        action_stack.push(DriveAction(vx=vx, vy=0.0, vz=vz, dt=actual_dt))
 
         if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= top_y_tol_px:
             stable += 1
@@ -308,7 +337,6 @@ def go_to_tower_recorded(
             y2 = int(selected.cy + selected.h / 2)
             cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 0, 255), 2)
             cv2.line(dbg, (int(frame_center_x), 0), (int(frame_center_x), frame_h - 1), (0, 255, 255), 1)
-            # Add class/conf label if available
             try:
                 name = model.names[selected.cls]
             except Exception:
@@ -317,7 +345,7 @@ def go_to_tower_recorded(
             cv2.putText(dbg, label, (x1, max(15, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             cv2.putText(
                 dbg,
-                f"err_x={err_x_px:+.1f} vz={vz:+.1f} fwd_err={err_forward_px:+.1f} stable={stable}/4",
+                f"err_x={err_x_px:+.1f} vz={vz:+.1f} fwd_err={err_forward_px:+.1f} stable={stable}/4 dt={actual_dt:.3f}s",
                 (10, 22),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
@@ -329,7 +357,11 @@ def go_to_tower_recorded(
                 raise KeyboardInterrupt
 
         if stable >= 4:
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+            # Stop the robot. Do NOT push this onto the stack — it is
+            # zero velocity so there is nothing to undo, and pushing it
+            # would cause unwind to pause at the end before moving.
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=DEFAULT_STOP_TIMEOUT_S)
+            time.sleep(DEFAULT_STOP_TIMEOUT_S + DEFAULT_STOP_SETTLE_S)
             return selected
 
     raise RuntimeError("go_to_tower_recorded exited loop unexpectedly.")
