@@ -1,0 +1,12 @@
+# Requirements for YOLOv8 (ultralytics), RoboMaster SDK, and OpenCV usage
+# Note: Install a matching `torch` build for your CUDA/CPU environment if needed.
+ultralytics
+robomaster
+opencv-python
+numpy
+torch
+torchvision
+pillow
+pyyaml
+matplotlib
+tqdm
