@@ -223,7 +223,7 @@ def go_to_tower_recorded(
     step_s: float = 0.12,
     timeout_s: float = 30.0,
     selection_mode: str = "conf",
-    show: bool = False,
+    show: bool = True,
 ) -> Detection:
     """Drive toward a tower using visual servoing, recording every drive command.
 
@@ -241,8 +241,8 @@ def go_to_tower_recorded(
     selected: Optional[Detection] = None
 
     while True:
-        if time.time() - t0 > timeout_s:
-            raise TimeoutError("Timed out while approaching tower.")
+        # if time.time() - t0 > timeout_s:
+        #     raise TimeoutError("Timed out while approaching tower.")
 
         try:
             frame = ep_camera.read_cv2_image(strategy="newest", timeout=2.0)
@@ -357,8 +357,8 @@ def detect_stable_two_towers(
     latest_pair: Optional[Tuple[Detection, Detection]] = None
 
     while True:
-        if time.time() - t0 > timeout_s:
-            raise TimeoutError("Timed out waiting to see two towers.")
+        # if time.time() - t0 > timeout_s:
+        #     raise TimeoutError("Timed out waiting to see two towers.")
 
         try:
             frame = ep_camera.read_cv2_image(strategy="newest", timeout=2.0)
@@ -424,8 +424,8 @@ def detect_single_tower_excluding(
     stable = 0
 
     while True:
-        if time.time() - t0 > timeout_s:
-            raise TimeoutError("Timed out searching for stashed Tower 1.")
+        # if time.time() - t0 > timeout_s:
+            # raise TimeoutError("Timed out searching for stashed Tower 1.")
 
         try:
             frame = ep_camera.read_cv2_image(strategy="newest", timeout=2.0)
