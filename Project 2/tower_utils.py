@@ -18,7 +18,7 @@ _MODEL_CANDIDATES = (
     _PROJECT_DIR / "cmsc477_yolo" / "runs" / "detect" / "train" / "weights" / "best.pt",
     Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt",
 )
-DEFAULT_MODEL_PATH = next((path for path in _MODEL_CANDIDATES if path.exists()), _MODEL_CANDIDATES[0])
+DEFAULT_MODEL_PATH = r"C:\Users\dutta\Documents\cmsc477\runs\detect\train5\weights\best.pt"
 DEFAULT_DETECT_CONF = 0.45
 DEFAULT_STOP_METRIC = "top_y"
 DEFAULT_DESIRED_H_PX = 170.0
