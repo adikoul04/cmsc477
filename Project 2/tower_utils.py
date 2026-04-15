@@ -80,6 +80,14 @@ def move_arm_to_top(
     """Move the arm to the raised reference posture used for travel/calibration."""
     ep_robot.robotic_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
 
+def move_arm_to_default(
+    ep_robot,
+    default_x=0,
+    default_y=0,
+):
+    """Move the arm to default position."""
+    ep_robot.robotic_arm.moveto(x=default_x, y=default_y).wait_for_completed()
+
 
 def get_detections(model, frame, conf_thresh=DEFAULT_DETECT_CONF, target_class=None):
     result = model.predict(source=frame, show=False, conf=conf_thresh, verbose=False)[0]

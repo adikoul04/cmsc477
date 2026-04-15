@@ -57,6 +57,7 @@ from tower_utils import (
     clamp,
     select_detection,
     move_arm_to_top,
+    move_arm_to_default
 )
 
 # ── Model / robot constants ────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ class ActionStack:
     def unwind(self, ep_chassis, ep_robot=None, pause_s: float = 0.05) -> None:
         """Reverse every recorded action to drive back to where recording started."""
         if ep_robot is not None:
-            move_arm_to_top(ep_robot)
+            move_arm_to_default(ep_robot)
         while self._stack:
             action = self._stack.pop()
             ep_chassis.drive_speed(
@@ -131,7 +132,7 @@ class ActionStack:
 def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
     """Replay a snapshot (list) of actions in forward order."""
     if ep_robot is not None:
-        move_arm_to_top(ep_robot)
+        move_arm_to_default(ep_robot)
     for action in route:
         ep_chassis.drive_speed(
             x=action.vx,
@@ -146,7 +147,7 @@ def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: f
 def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
     """Replay a snapshot in reverse order with negated velocities."""
     if ep_robot is not None:
-        move_arm_to_top(ep_robot)
+        move_arm_to_default(ep_robot)
     for action in reversed(route):
         ep_chassis.drive_speed(
             x=-action.vx,
@@ -175,7 +176,7 @@ def drive_to_stash(ep_chassis, ep_robot=None) -> List[DriveAction]:
     pause_s = 0.05
 
     if ep_robot is not None:
-        move_arm_to_top(ep_robot)
+        move_arm_to_default(ep_robot)
 
     # 1. Yaw 90° LEFT
     yaw_dt = STASH_YAW_DEG / STASH_YAW_DPS
@@ -232,7 +233,7 @@ def go_to_tower_recorded(
     Returns the final Detection used to declare arrival.
     """
     action_stack.clear()
-    move_arm_to_top(ep_robot)
+    move_arm_to_default(ep_robot)
 
     stable = 0
     center_stable = 0
