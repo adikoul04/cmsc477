@@ -286,7 +286,8 @@ def go_to_tower_recorded(
 
         if not allow_forward:
             vx = 0.0
-            vz = clamp(-k_yaw * err_x_px, -max_yaw_dps, max_yaw_dps)
+            # Reverse yaw sign so left-side detections produce the correct turn direction
+            vz = clamp(k_yaw * err_x_px, -max_yaw_dps, max_yaw_dps)
         else:
             vx = clamp(k_forward * err_forward_px, -max_v, max_v)
             vz = 0.0
@@ -307,6 +308,13 @@ def go_to_tower_recorded(
             y2 = int(selected.cy + selected.h / 2)
             cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 0, 255), 2)
             cv2.line(dbg, (int(frame_center_x), 0), (int(frame_center_x), frame_h - 1), (0, 255, 255), 1)
+            # Add class/conf label if available
+            try:
+                name = model.names[selected.cls]
+            except Exception:
+                name = str(selected.cls)
+            label = f"{name} {selected.conf:.2f}"
+            cv2.putText(dbg, label, (x1, max(15, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             cv2.putText(
                 dbg,
                 f"err_x={err_x_px:+.1f} vz={vz:+.1f} fwd_err={err_forward_px:+.1f} stable={stable}/4",
@@ -519,6 +527,8 @@ def main() -> None:
     ep_camera = ep_robot.camera
     ep_chassis = ep_robot.chassis
 
+    # Disable the SDK's built-in display so we can show annotated frames
+    # (bounding boxes) using OpenCV windows from the processing code.
     ep_camera.start_video_stream(display=False, resolution=resolve_resolution(args.resolution))
 
     global STASH_YAW_DEG, STASH_FORWARD_M
