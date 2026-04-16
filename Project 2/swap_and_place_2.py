@@ -40,6 +40,7 @@ from queue import Empty
 from typing import Deque, List, Optional, Tuple
 
 import cv2
+from yaml import parser
 from ultralytics import YOLO
 
 import robomaster
@@ -66,10 +67,8 @@ ROBOT_IP   = "192.168.50.117"
 ROBOT_SN   = "3JKCH8800100RC"
 
 # ── Stash parameters ───────────────────────────────────────────────────────────
-STASH_YAW_DEG      = 90.0   # degrees to turn before driving to stash spot
-STASH_YAW_DPS      = 45.0   # yaw rate used for the stash turn (deg/s)
-STASH_FORWARD_M    = 0.2   # metres to drive forward to the stash spot
-STASH_FORWARD_MPS  = 0.15   # forward speed used while stashing (m/s)
+STASH_LATERAL_M    = 0.2    # metres to strafe left to the stash spot
+STASH_LATERAL_MPS  = 0.15   # lateral speed while stashing (m/s)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -164,13 +163,12 @@ def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: 
 # ──────────────────────────────────────────────────────────────────────────────
 
 def drive_to_stash(ep_chassis, ep_robot=None) -> List[DriveAction]:
-    """Turn 90° LEFT then drive forward to the stash spot.
+    """Move LEFT 0.4 m to the stash spot (no turning).
 
     The robot stops AT the stash spot with the tower still in the gripper.
     The caller is responsible for calling place_down_tower() before reversing.
 
-    Returns stash_route (the two actions taken) so the caller can reverse them
-    to get back to T1's original slot.
+    Returns stash_route so the caller can reverse it to return to the original slot.
     """
     stash_route: List[DriveAction] = []
     pause_s = 0.05
@@ -178,26 +176,16 @@ def drive_to_stash(ep_chassis, ep_robot=None) -> List[DriveAction]:
     if ep_robot is not None:
         move_arm_to_default(ep_robot)
 
-    # 1. Yaw 90° LEFT
-    yaw_dt = STASH_YAW_DEG / STASH_YAW_DPS
-    left_yaw_dps = -abs(STASH_YAW_DPS)
-    yaw_action = DriveAction(vx=0.0, vy=0.0, vz=left_yaw_dps, dt=yaw_dt)
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=left_yaw_dps, timeout=yaw_dt)
-    time.sleep(yaw_dt + pause_s)
-    stash_route.append(yaw_action)
-
-    # 2. Drive forward to stash spot
-    fwd_dt = STASH_FORWARD_M / STASH_FORWARD_MPS
-    fwd_action = DriveAction(vx=STASH_FORWARD_MPS, vy=0.0, vz=0.0, dt=fwd_dt)
-    ep_chassis.drive_speed(x=STASH_FORWARD_MPS, y=0.0, z=0.0, timeout=fwd_dt)
-    time.sleep(fwd_dt + pause_s)
-    stash_route.append(fwd_action)
+    # Strafe left to stash spot (vy negative = left on RoboMaster frame)
+    lat_dt = STASH_LATERAL_M / STASH_LATERAL_MPS
+    left_action = DriveAction(vx=0.0, vy=-STASH_LATERAL_MPS, vz=0.0, dt=lat_dt)
+    ep_chassis.drive_speed(x=0.0, y=-STASH_LATERAL_MPS, z=0.0, timeout=lat_dt)
+    time.sleep(lat_dt + pause_s)
+    stash_route.append(left_action)
 
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
     time.sleep(0.15)
 
-    # Robot is now at the stash spot. Caller places the tower, then calls
-    # reverse_route(ep_chassis, stash_route) to return to T1's original slot.
     return stash_route
 
 
@@ -217,18 +205,18 @@ def go_to_tower_recorded(
     center_tol_px: float = 24.0,
     top_y_tol_px: float = DEFAULT_ALIGN_TOP_TOL_PX,
     k_forward: float = 0.0028,
-    k_yaw: float = 0.12,
+    k_lateral: float = 0.003,   # replaces k_yaw; px → m/s
     max_v: float = 0.16,
-    max_yaw_dps: float = 45.0,
     step_s: float = 0.12,
     timeout_s: float = 30.0,
     selection_mode: str = "conf",
     show: bool = True,
 ) -> Detection:
-    """Drive toward a tower using visual servoing, recording every drive command.
+    """Drive toward a tower using visual servoing (no turning), recording every drive command.
 
-    Every ``drive_speed`` command is pushed onto *action_stack* so the caller
-    can later unwind (return to start) or snapshot+replay (re-visit the spot).
+    Lateral correction (vy) is used to center the target horizontally instead of yawing.
+    Forward correction (vx) closes the distance once the target is centered.
+    Every drive_speed command is pushed onto action_stack for later unwinding.
 
     Returns the final Detection used to declare arrival.
     """
@@ -241,9 +229,6 @@ def go_to_tower_recorded(
     selected: Optional[Detection] = None
 
     while True:
-        # if time.time() - t0 > timeout_s:
-        #     raise TimeoutError("Timed out while approaching tower.")
-
         try:
             frame = ep_camera.read_cv2_image(strategy="newest", timeout=2.0)
         except Empty:
@@ -256,7 +241,6 @@ def go_to_tower_recorded(
 
         detections = get_detections(model, frame, conf_thresh, target_class)
         if not detections:
-            # Hold still but record the idle action so unwind stays accurate.
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
             action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
             continue
@@ -286,14 +270,14 @@ def go_to_tower_recorded(
 
         if not allow_forward:
             vx = 0.0
-            # Reverse yaw sign so left-side detections produce the correct turn direction
-            vz = clamp(k_yaw * err_x_px, -max_yaw_dps, max_yaw_dps)
+            # Positive err_x_px means tower is right of center → strafe right (vy positive)
+            vy = clamp(k_lateral * err_x_px, -max_v, max_v)
         else:
             vx = clamp(k_forward * err_forward_px, -max_v, max_v)
-            vz = 0.0
+            vy = 0.0
 
-        ep_chassis.drive_speed(x=vx, y=0.0, z=vz, timeout=step_s)
-        action_stack.push(DriveAction(vx=vx, vy=0.0, vz=vz, dt=step_s))
+        ep_chassis.drive_speed(x=vx, y=vy, z=0.0, timeout=step_s)
+        action_stack.push(DriveAction(vx=vx, vy=vy, vz=0.0, dt=step_s))
 
         if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= top_y_tol_px:
             stable += 1
@@ -308,7 +292,6 @@ def go_to_tower_recorded(
             y2 = int(selected.cy + selected.h / 2)
             cv2.rectangle(dbg, (x1, y1), (x2, y2), (0, 0, 255), 2)
             cv2.line(dbg, (int(frame_center_x), 0), (int(frame_center_x), frame_h - 1), (0, 255, 255), 1)
-            # Add class/conf label if available
             try:
                 name = model.names[selected.cls]
             except Exception:
@@ -317,7 +300,7 @@ def go_to_tower_recorded(
             cv2.putText(dbg, label, (x1, max(15, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             cv2.putText(
                 dbg,
-                f"err_x={err_x_px:+.1f} vz={vz:+.1f} fwd_err={err_forward_px:+.1f} stable={stable}/4",
+                f"err_x={err_x_px:+.1f} vy={vy:+.3f} fwd_err={err_forward_px:+.1f} stable={stable}/4",
                 (10, 22),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
@@ -489,16 +472,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--align-center-tol-px", type=float, default=24.0)
     parser.add_argument("--align-top-tol-px", type=float, default=DEFAULT_ALIGN_TOP_TOL_PX)
     parser.add_argument("--k-forward", type=float, default=0.0028)
-    parser.add_argument("--k-yaw", type=float, default=0.12)
+    parser.add_argument("--k-lateral", type=float, default=0.003)
     parser.add_argument("--max-v", type=float, default=0.16)
-    parser.add_argument("--max-yaw-dps", type=float, default=45.0)
     parser.add_argument("--servo-step-s", type=float, default=0.12)
     parser.add_argument("--exclusion-tol-px", type=float, default=90.0,
                         help="Pixel tolerance for excluding the already-placed tower during T1 rescan.")
-    parser.add_argument("--stash-yaw-deg", type=float, default=STASH_YAW_DEG,
-                        help="Degrees to turn before driving to the stash spot.")
-    parser.add_argument("--stash-forward-m", type=float, default=STASH_FORWARD_M,
-                        help="Metres to drive forward to the stash spot.")
+    parser.add_argument("--stash-lateral-m", type=float, default=STASH_LATERAL_M,
+                        help="Metres to strafe left to the stash spot.")
+    parser.add_argument("--stash-lateral-mps", type=float, default=STASH_LATERAL_MPS,
+                        help="Lateral speed while stashing (m/s).")
     parser.add_argument("--show", action="store_true")
     return parser.parse_args()
 
@@ -531,9 +513,9 @@ def main() -> None:
     # (bounding boxes) using OpenCV windows from the processing code.
     ep_camera.start_video_stream(display=False, resolution=resolve_resolution(args.resolution))
 
-    global STASH_YAW_DEG, STASH_FORWARD_M
-    STASH_YAW_DEG   = args.stash_yaw_deg
-    STASH_FORWARD_M = args.stash_forward_m
+    global STASH_LATERAL_M, STASH_LATERAL_MPS
+    STASH_LATERAL_M   = args.stash_lateral_m
+    STASH_LATERAL_MPS = args.stash_lateral_mps
 
     servo_kwargs = dict(
         target_class=args.target_class,
@@ -542,9 +524,8 @@ def main() -> None:
         center_tol_px=args.align_center_tol_px,
         top_y_tol_px=args.align_top_tol_px,
         k_forward=args.k_forward,
-        k_yaw=args.k_yaw,
+        k_lateral=args.k_lateral,
         max_v=args.max_v,
-        max_yaw_dps=args.max_yaw_dps,
         step_s=args.servo_step_s,
         show=args.show,
     )
