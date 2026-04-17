@@ -289,7 +289,10 @@ def go_to_tower_recorded(
             vx = 0.0
             # Positive err_x_px means tower is right of center → strafe right (vy positive)
             # vy = clamp(k_lateral * err_x_px, -max_v, max_v)
-            vy = clamp(k_lateral * -200, -max_v, max_v)
+            if err_x_px < 0:
+                vy = clamp(k_lateral * -200, -max_v, max_v)
+            else:
+                vy = clamp(k_lateral * 200, -max_v, max_v)
         else:
             # vx = clamp(k_forward * err_forward_px, -max_v, max_v)
             vx = clamp(k_forward * 200, -max_v, max_v)
