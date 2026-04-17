@@ -223,7 +223,7 @@ def go_to_tower_recorded(
     k_forward: float = 0.01,
     k_lateral: float = 0.01,   # replaces k_yaw; px → m/s
     max_v: float = 0.16,
-    step_s: float = 0.12,
+    step_s: float = 0.25,
     timeout_s: float = 30.0,
     selection_mode: str = "conf",
     show: bool = True,
@@ -292,7 +292,7 @@ def go_to_tower_recorded(
             vy = clamp(k_lateral * -200, -max_v, max_v)
         else:
             # vx = clamp(k_forward * err_forward_px, -max_v, max_v)
-            vx = clamp(k_forward * -200, -max_v, max_v)
+            vx = clamp(k_forward * 200, -max_v, max_v)
             vy = 0.0
 
         ep_chassis.drive_speed(x=vx, y=vy, z=0.0, timeout=step_s)
