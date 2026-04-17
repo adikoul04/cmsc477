@@ -184,13 +184,19 @@ def drive_to_stash(ep_chassis, ep_robot=None) -> List[DriveAction]:
     time.sleep(lat_dt + pause_s)
     stash_route.append(left_action)
 
+    stop_action = DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=0.2)
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=stop_action.dt)
+    time.sleep(stop_action.dt + pause_s)
+    stash_route.append(stop_action)
+
     forward_action = DriveAction(vx=STASH_LATERAL_MPS, vy=0.0, vz=0.0, dt=lat_dt)
     ep_chassis.drive_speed(x=STASH_LATERAL_MPS, y=0.0, z=0.0, timeout=lat_dt)
     time.sleep(lat_dt + pause_s)
     stash_route.append(forward_action)
 
-    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
-    time.sleep(0.15)
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=stop_action.dt)
+    time.sleep(stop_action.dt + pause_s)
+    stash_route.append(stop_action)
 
     return stash_route
 
@@ -285,6 +291,9 @@ def go_to_tower_recorded(
         ep_chassis.drive_speed(x=vx, y=vy, z=0.0, timeout=step_s)
         action_stack.push(DriveAction(vx=vx, vy=vy, vz=0.0, dt=step_s))
 
+        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
+        action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
+
         if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= top_y_tol_px:
             stable += 1
         else:
@@ -318,7 +327,8 @@ def go_to_tower_recorded(
                 raise KeyboardInterrupt
 
         if stable >= 4:
-            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+            ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
+            action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
             return selected
 
     raise RuntimeError("go_to_tower_recorded exited loop unexpectedly.")
