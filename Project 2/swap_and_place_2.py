@@ -288,9 +288,11 @@ def go_to_tower_recorded(
         if not allow_forward:
             vx = 0.0
             # Positive err_x_px means tower is right of center → strafe right (vy positive)
-            vy = clamp(k_lateral * err_x_px, -max_v, max_v)
+            # vy = clamp(k_lateral * err_x_px, -max_v, max_v)
+            vy = clamp(k_lateral * 20, -max_v, max_v)
         else:
-            vx = clamp(k_forward * err_forward_px, -max_v, max_v)
+            # vx = clamp(k_forward * err_forward_px, -max_v, max_v)
+            vx = clamp(k_forward * 20, -max_v, max_v)
             vy = 0.0
 
         ep_chassis.drive_speed(x=vx, y=vy, z=0.0, timeout=step_s)
