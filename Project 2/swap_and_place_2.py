@@ -297,7 +297,7 @@ def go_to_tower_recorded(
 
         ep_chassis.drive_speed(x=vx, y=vy, z=0.0, timeout=step_s)
         action_stack.push(DriveAction(vx=vx, vy=vy, vz=0.0, dt=step_s))
-        time.sleep(step_s + 0.05)
+        # time.sleep(step_s + 0.05)
 
         # Add pause to stack
         # ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
