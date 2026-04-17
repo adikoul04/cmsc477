@@ -130,7 +130,7 @@ class ActionStack:
             )
             time.sleep(action.dt + pause_s)
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
-        time.sleep(action.dt + pause_s)
+        time.sleep(0.1 + pause_s)
 
 
 def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
@@ -146,7 +146,7 @@ def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: f
         )
         time.sleep(action.dt + pause_s)
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
-    time.sleep(action.dt + pause_s)
+    time.sleep(0.1 + pause_s)
 
 
 def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
@@ -162,7 +162,7 @@ def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: 
         )
         time.sleep(action.dt + pause_s)
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
-    time.sleep(action.dt + pause_s)
+    time.sleep(0.1 + pause_s)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
