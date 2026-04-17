@@ -299,9 +299,10 @@ def go_to_tower_recorded(
         action_stack.push(DriveAction(vx=vx, vy=vy, vz=0.0, dt=step_s))
         time.sleep(step_s + 0.05)
 
-        ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
-        action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
-        time.sleep(step_s + 0.05)
+        # Add pause to stack
+        # ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
+        # action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
+        # time.sleep(step_s + 0.05)
 
         if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= top_y_tol_px:
             stable += 1
