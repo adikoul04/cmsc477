@@ -114,6 +114,7 @@ class ActionStack:
             )
             time.sleep(action.dt + pause_s)
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+        time.sleep(0.1 + pause_s)
 
     def replay(self, ep_chassis, pause_s: float = 0.05) -> None:
         """Replay actions in forward order (re-travel a previously recorded route)."""
@@ -126,6 +127,7 @@ class ActionStack:
             )
             time.sleep(action.dt + pause_s)
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+        time.sleep(action.dt + pause_s)
 
 
 def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
@@ -141,6 +143,7 @@ def replay_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: f
         )
         time.sleep(action.dt + pause_s)
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+    time.sleep(action.dt + pause_s)
 
 
 def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: float = 0.05) -> None:
@@ -156,6 +159,7 @@ def reverse_route(ep_chassis, route: List[DriveAction], ep_robot=None, pause_s: 
         )
         time.sleep(action.dt + pause_s)
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+    time.sleep(action.dt + pause_s)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -255,6 +259,7 @@ def go_to_tower_recorded(
         if not detections:
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
             action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
+            time.sleep(step_s + 0.05)
             continue
 
         frame_w = frame.shape[1]
@@ -290,9 +295,11 @@ def go_to_tower_recorded(
 
         ep_chassis.drive_speed(x=vx, y=vy, z=0.0, timeout=step_s)
         action_stack.push(DriveAction(vx=vx, vy=vy, vz=0.0, dt=step_s))
+        time.sleep(step_s + 0.05)
 
         ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
         action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
+        time.sleep(step_s + 0.05)
 
         if abs(err_x_px) <= center_tol_px and abs(err_forward_px) <= top_y_tol_px:
             stable += 1
@@ -329,6 +336,7 @@ def go_to_tower_recorded(
         if stable >= 4:
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=step_s)
             action_stack.push(DriveAction(vx=0.0, vy=0.0, vz=0.0, dt=step_s))
+            time.sleep(step_s + 0.05)
             return selected
 
     raise RuntimeError("go_to_tower_recorded exited loop unexpectedly.")
