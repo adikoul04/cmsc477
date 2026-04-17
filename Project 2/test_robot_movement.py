@@ -2,13 +2,13 @@
 """Command-line tester for RoboMaster chassis, arm, and gripper movement.
 
 Examples:
-  python "Project 2/test_robot_movement.py" --rotate 90
-  python "Project 2/test_robot_movement.py" --move-position 0.3 -0.2
-  python "Project 2/test_robot_movement.py" --move-velocity 0.15 0.0
-  python "Project 2/test_robot_movement.py" --move-arm-absolute 180 30
-  python "Project 2/test_robot_movement.py" --move-arm-relative 20 -10
-  python "Project 2/test_robot_movement.py" --gripper-open
-  python "Project 2/test_robot_movement.py" --gripper-close
+  python "test_robot_movement.py" --rotate 0
+  python "test_robot_movement.py" --move-position 0.3 -0.2
+  python "test_robot_movement.py" --move-velocity 0.15 0.0
+  python "test_robot_movement.py" --move-arm-absolute 180 30
+  python "test_robot_movement.py" --move-arm-relative 20 -10
+  python "test_robot_movement.py" --gripper-open
+  python "test_robot_movement.py" --gripper-close
 """
 
 import argparse

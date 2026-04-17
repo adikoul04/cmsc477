@@ -276,6 +276,8 @@ def go_to_tower_recorded(
         err_x_px = selected.cx - frame_center_x
         target_top_y_px = target_top_y_ratio * frame_h
         err_forward_px = target_top_y_px - y_top_px
+        # normalized top-y ratio (0.0..1.0) of the detected tower top
+        y_ratio = y_top_px / max(frame_h, 1)
 
         centered = abs(err_x_px) <= center_tol_px
         if centered:
@@ -328,13 +330,15 @@ def go_to_tower_recorded(
             cv2.putText(dbg, label, (x1, max(15, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
             cv2.putText(
                 dbg,
-                f"err_x={err_x_px:+.1f} vy={vy:+.3f} fwd_err={err_forward_px:+.1f} stable={stable}/4",
+                f"err_x={err_x_px:+.1f} vy={vy:+.3f} fwd_err={err_forward_px:+.1f} top_y_ratio={y_ratio:.3f} stable={stable}/4",
                 (10, 22),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
                 (0, 255, 255),
                 2,
             )
+            # also print to console so the feed and logs both show the ratio
+            print(f"y_ratio={y_ratio:.3f} err_x={err_x_px:+.1f} fwd_err={err_forward_px:+.1f}")
             cv2.imshow("go_to_tower_recorded", dbg)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 raise KeyboardInterrupt
