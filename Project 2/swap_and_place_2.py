@@ -178,10 +178,16 @@ def drive_to_stash(ep_chassis, ep_robot=None) -> List[DriveAction]:
 
     # Strafe left to stash spot (vy negative = left on RoboMaster frame)
     lat_dt = STASH_LATERAL_M / STASH_LATERAL_MPS
+    
     left_action = DriveAction(vx=0.0, vy=-STASH_LATERAL_MPS, vz=0.0, dt=lat_dt)
     ep_chassis.drive_speed(x=0.0, y=-STASH_LATERAL_MPS, z=0.0, timeout=lat_dt)
     time.sleep(lat_dt + pause_s)
     stash_route.append(left_action)
+
+    forward_action = DriveAction(vx=STASH_LATERAL_MPS, vy=0.0, vz=0.0, dt=lat_dt)
+    ep_chassis.drive_speed(x=STASH_LATERAL_MPS, y=0.0, z=0.0, timeout=lat_dt)
+    time.sleep(lat_dt + pause_s)
+    stash_route.append(forward_action)
 
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
     time.sleep(0.15)
