@@ -220,7 +220,7 @@ def go_to_tower_recorded(
     target_top_y_ratio: float = DEFAULT_TARGET_TOP_Y_RATIO,
     center_tol_px: float = 24.0,
     top_y_tol_px: float = DEFAULT_ALIGN_TOP_TOL_PX,
-    k_forward: float = 0.01,
+    k_forward: float = 0.005,
     k_lateral: float = 0.01,   # replaces k_yaw; px → m/s
     max_v: float = 0.16,
     step_s: float = 0.25,
