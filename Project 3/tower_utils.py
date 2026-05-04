@@ -140,7 +140,7 @@ def pick_up_tower(
     gripper_power=DEFAULT_GRIPPER_POWER,
     grip_wait_seconds=DEFAULT_GRIPPER_WAIT_SECONDS,
 ):
-    """Lower the arm, grip the tower, and raise it back up."""
+    """Pick up a tower by lowering close-in first, then extending and lifting."""
     owns_robot = ep_robot is None
     if owns_robot:
         ep_robot = connect_robot(conn_type=conn_type, robot_ip=robot_ip, sn=sn)
@@ -149,15 +149,18 @@ def pick_up_tower(
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
 
+        # Start from home, lower while retracted, then extend at that lowered height.
         move_arm_to_default(ep_robot)
-        ep_arm.moveto(x=arm_x, y=approach_y).wait_for_completed()
+        ep_arm.moveto(x=0, y=lower_y).wait_for_completed()
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
 
         ep_gripper.close(power=gripper_power)
         time.sleep(grip_wait_seconds)
         ep_gripper.pause()
 
+        # Lift first, then retract to a stable raised posture near the robot.
         ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
+        ep_arm.moveto(x=0, y=raised_y).wait_for_completed()
         return ep_robot
     finally:
         if owns_robot:
@@ -176,7 +179,7 @@ def place_down_tower(
     gripper_power=DEFAULT_GRIPPER_POWER,
     grip_wait_seconds=DEFAULT_GRIPPER_WAIT_SECONDS,
 ):
-    """Lower the arm, release the tower, and raise the arm back up."""
+    """Place a tower by extending high, lowering, releasing, then returning home."""
     owns_robot = ep_robot is None
     if owns_robot:
         ep_robot = connect_robot(conn_type=conn_type, robot_ip=robot_ip, sn=sn)
@@ -185,7 +188,9 @@ def place_down_tower(
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
 
-        ep_arm.moveto(x=arm_x, y=approach_y).wait_for_completed()
+        # Keep the arm high while moving forward, then lower to place.
+        # ep_arm.moveto(x=0, y=raised_y).wait_for_completed() 
+        ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
 
         ep_gripper.open(power=gripper_power)
