@@ -8,12 +8,7 @@ from queue import Empty
 from robomaster import camera
 from robomaster import robot
 import robomaster
-
-
-DEFAULT_ROBOT_IP = "192.168.50.117"
-DEFAULT_ROBOT_SN = "3JKCH8800100RC"
-# DEFAULT_ROBOT_IP   = "192.168.50.118"
-# DEFAULT_ROBOT_SN   = "3JKCH8800100WM"
+from config import DEFAULT_ROBOT_IP, DEFAULT_ROBOT_SN
 
 
 def parse_args():

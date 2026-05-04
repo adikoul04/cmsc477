@@ -1,12 +1,14 @@
 import argparse
 
-from tower_utils import (
+from config import (
     DEFAULT_DETECT_CONF,
     DEFAULT_MODEL_PATH,
     DEFAULT_ROBOT_IP,
     DEFAULT_ROBOT_SN,
     DEFAULT_STOP_METRIC,
     DEFAULT_TARGET_TOP_Y_RATIO,
+)
+from tower_utils import (
     connect_robot,
     go_to_tower,
     load_model,

@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from queue import Empty
 import math
 import time
@@ -10,36 +9,18 @@ import cv2
 from ultralytics import YOLO
 from robomaster import camera
 
-from capture_robot_images import DEFAULT_ROBOT_IP, DEFAULT_ROBOT_SN
-
-
-_PROJECT_DIR = Path(__file__).resolve().parent
-_MODEL_CANDIDATES = (
-    _PROJECT_DIR / "cmsc477_yolo" / "runs" / "detect" / "train" / "weights" / "best.pt",
-    Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt",
+from config import (
+    DEFAULT_APPROACH_Y,
+    DEFAULT_ARM_X,
+    DEFAULT_DETECT_CONF,
+    DEFAULT_GRIPPER_POWER,
+    DEFAULT_GRIPPER_WAIT_SECONDS,
+    DEFAULT_LOWER_Y,
+    DEFAULT_MODEL_PATH,
+    DEFAULT_RAISED_Y,
+    DEFAULT_ROBOT_IP,
+    DEFAULT_ROBOT_SN,
 )
-DEFAULT_MODEL_PATH = r"C:\Users\dutta\Documents\cmsc477\runs\detect\train5\weights\best.pt"
-DEFAULT_DETECT_CONF = 0.45
-DEFAULT_STOP_METRIC = "top_y"
-DEFAULT_DESIRED_H_PX = 170.0
-DEFAULT_TARGET_TOP_Y_RATIO = 0.70
-DEFAULT_ALIGN_CENTER_TOL_PX = 24.0
-DEFAULT_ALIGN_HEIGHT_TOL_PX = 16.0
-DEFAULT_ALIGN_TOP_TOL_PX = 18.0
-DEFAULT_K_FORWARD = 0.0028
-DEFAULT_K_LATERAL = 0.0038
-DEFAULT_K_YAW = 0.12
-DEFAULT_LATERAL_SIGN = -1.0
-DEFAULT_MAX_V = 0.16
-DEFAULT_MAX_YAW_DPS = 45.0
-DEFAULT_SERVO_STEP_S = 0.12
-
-DEFAULT_ARM_X = 180
-DEFAULT_APPROACH_Y = 30
-DEFAULT_LOWER_Y = -50
-DEFAULT_RAISED_Y = 100
-DEFAULT_GRIPPER_POWER = 50
-DEFAULT_GRIPPER_WAIT_SECONDS = 1.0
 
 
 @dataclass

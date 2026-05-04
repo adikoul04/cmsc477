@@ -45,6 +45,60 @@ import pupil_apriltags
 from ultralytics import YOLO
 
 import robomaster
+from config import (
+    ALL_LANDMARK_TAG_IDS,
+    ARENA_H_M,
+    ARENA_W_M,
+    BATTERY_LARGE_BRICK_COST,
+    BATTERY_RECHARGE_LEVEL,
+    BATTERY_RESERVE_PCT,
+    BATTERY_SMALL_BRICK_COST,
+    BATTERY_START_PCT,
+    BRICK_SERVO_CENTER_TOL_PX,
+    BRICK_SERVO_K_FWD,
+    BRICK_SERVO_K_LAT,
+    BRICK_SERVO_MAX_V,
+    BRICK_SERVO_STABLE_THRESH,
+    BRICK_SERVO_STEP_S,
+    BRICK_SERVO_TOP_TOL_PX,
+    BRICK_SERVO_TOP_Y_RATIO,
+    CLASS_BOX,
+    CLASS_CONE,
+    CLASS_LARGE_BRICK,
+    CLASS_SMALL_BRICK,
+    K_CAM,
+    LARGE_GOAL_TAG_IDS,
+    MODEL_PATH,
+    MOVE_SPEED_MPS,
+    OBS_APPROACH_DIST_M,
+    OBS_CLEAR_DIST_M,
+    OBS_FWD_SPEED_MPS,
+    OBS_SLIDE_SPEED_MPS,
+    PURPLE_HSV_HI,
+    PURPLE_HSV_LO,
+    PURPLE_MIN_AREA_PX,
+    RECHARGE_APPROACH_DIST_M,
+    RECHARGE_HOLD_S,
+    RECHARGE_STOP_DIST_M,
+    RECHARGE_TAG_IDS,
+    ROBOT_IP,
+    ROBOT_SN,
+    SIDE1_Y_LIMIT,
+    SMALL_GOAL_TAG_IDS,
+    SWEEP_SETTLE_S,
+    SWEEP_STEP_DEG,
+    TAG_DIST_TOL_M,
+    TAG_FAMILY,
+    TAG_SERVO_CENTER_TOL_PX,
+    TAG_SERVO_DIST_TOL_M,
+    TAG_SERVO_K_FWD,
+    TAG_SERVO_K_YAW,
+    TAG_SERVO_MAX_V,
+    TAG_SERVO_MAX_YAW_DPS,
+    TAG_SERVO_STEP_S,
+    TAG_SIZE_M,
+    TURN_SPEED_DPS,
+)
 from robomaster import camera as rm_camera
 from robomaster import robot
 
@@ -63,109 +117,52 @@ from tower_utils import (
 # Robot / model connection constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-ROBOT_IP   = "192.168.50.117"
-ROBOT_SN   = "3JKCH8800100RC"
-MODEL_PATH = r"C:\Users\dutta\Documents\cmsc477\runs\detect\train5\weights\best.pt"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Arena geometry
 # ─────────────────────────────────────────────────────────────────────────────
 
-ARENA_W_M = 3.048   # 10 ft in metres
-ARENA_H_M = 3.048   # 10 ft in metres
 
 # Approximate y-boundary that separates Side-1 from the obstacle field.
 # Side-1 occupies y ∈ [0, SIDE1_Y_LIMIT]. Tune after measuring.
-SIDE1_Y_LIMIT = 1.0   # m
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Camera intrinsics (from project 1)
 # ─────────────────────────────────────────────────────────────────────────────
 
-K_CAM = np.array(
-    [[314.0, 0.0, 320.0],
-     [0.0,   314.0, 180.0],
-     [0.0,   0.0,   1.0]],
-    dtype=float,
-)
-
-TAG_FAMILY    = "tag36h11"
-TAG_SIZE_M    = 0.2    # physical side-length of the ArUco tags in metres; adjust!
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ArUco tag ID groups
 # ─────────────────────────────────────────────────────────────────────────────
 
-RECHARGE_TAG_IDS    = {8, 10}
-SMALL_GOAL_TAG_IDS  = {27, 30}
-LARGE_GOAL_TAG_IDS  = {34, 38}
-ALL_LANDMARK_TAG_IDS = RECHARGE_TAG_IDS | SMALL_GOAL_TAG_IDS | LARGE_GOAL_TAG_IDS
 
 # ─────────────────────────────────────────────────────────────────────────────
 # YOLO class IDs
 # ─────────────────────────────────────────────────────────────────────────────
 
-CLASS_CONE        = 0
-CLASS_BOX         = 1
-CLASS_SMALL_BRICK = 2
-CLASS_LARGE_BRICK = 3
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Battery constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-BATTERY_START_PCT        = 60.0
-BATTERY_LARGE_BRICK_COST = 40.0
-BATTERY_SMALL_BRICK_COST = 30.0
-BATTERY_RECHARGE_LEVEL   = 100.0
 
 # Safety margin: always keep at least this much battery in reserve so we
 # can still drive to the recharge station after an unexpected delay.
-BATTERY_RESERVE_PCT = 5.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Navigation / servo constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-MOVE_SPEED_MPS          = 0.20    # open-loop translation speed
-TURN_SPEED_DPS          = 35.0    # open-loop rotation speed
-SWEEP_STEP_DEG          = 15.0    # degrees per sweep sub-step during startup scan
-SWEEP_SETTLE_S          = 0.6     # settle time after each sweep rotation
 
 # Obstacle avoidance
-OBS_CLEAR_DIST_M        = 0.45    # minimum clear corridor width to declare path free
-OBS_APPROACH_DIST_M     = 0.35    # stop this far from an obstacle; then slide
-OBS_SLIDE_SPEED_MPS     = 0.12    # lateral speed when siding around obstacles
-OBS_FWD_SPEED_MPS       = 0.14    # slow forward inside obstacle field
 
 # Recharge approach
-RECHARGE_APPROACH_DIST_M = 0.30   # must begin head-on from at least this far
-RECHARGE_STOP_DIST_M     = 0.05   # stop within 5 cm of tag
-RECHARGE_HOLD_S          = 5.0    # stay stationary for this long to charge
 
 # AprilTag servo
-TAG_SERVO_CENTER_TOL_PX = 20.0    # pixel tolerance to call "centered"
-TAG_SERVO_DIST_TOL_M    = 0.05    # distance tolerance for arrival
-TAG_SERVO_K_YAW         = 0.08    # proportional gain for yaw correction (deg/s per px)
-TAG_SERVO_K_FWD         = 0.6     # proportional gain for forward approach (m/s per m error)
-TAG_SERVO_MAX_YAW_DPS   = 35.0
-TAG_SERVO_MAX_V         = 0.18
-TAG_SERVO_STEP_S        = 0.12
 
 # YOLO brick servo (mirrors project 2 go_to_tower_recorded style)
-BRICK_SERVO_CENTER_TOL_PX  = 24.0
-BRICK_SERVO_TOP_Y_RATIO    = 0.70
-BRICK_SERVO_TOP_TOL_PX     = 18.0
-BRICK_SERVO_K_FWD          = 0.005
-BRICK_SERVO_K_LAT          = 0.010
-BRICK_SERVO_MAX_V          = 0.16
-BRICK_SERVO_STEP_S         = 0.20
-BRICK_SERVO_STABLE_THRESH  = 4
 
 # Purple tape HSV bounds for loading dock segmentation
-PURPLE_HSV_LO = np.array([125, 60,  40],  dtype=np.uint8)
-PURPLE_HSV_HI = np.array([155, 255, 255], dtype=np.uint8)
-PURPLE_MIN_AREA_PX = 1500   # minimum blob area to call it the dock
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data classes
@@ -916,10 +913,6 @@ def servo_to_tag(
     chassis_stop(ep_chassis)
     print(f"  [TagServo] Timeout after {timeout_s}s.")
     return False
-
-
-# Missing constant (referenced above)
-TAG_DIST_TOL_M = TAG_SERVO_DIST_TOL_M
 
 
 # ─────────────────────────────────────────────────────────────────────────────
