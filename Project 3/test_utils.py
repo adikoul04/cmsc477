@@ -10,7 +10,6 @@ from config import (
 )
 from tower_utils import (
     connect_robot,
-    go_to_tower,
     load_model,
     pick_up_tower,
     place_down_tower,
@@ -44,33 +43,10 @@ def parse_args():
         help="Robot serial number.",
     )
     parser.add_argument(
-        "--model-path",
-        default=str(DEFAULT_MODEL_PATH),
-        help="Path to YOLO weights used by go_to_tower().",
-    )
-    parser.add_argument(
-        "--resolution",
-        default="360p",
-        choices=["360p", "720p"],
-        help="Camera stream resolution used by go_to_tower().",
-    )
-    parser.add_argument(
-        "--stop-metric",
-        default=DEFAULT_STOP_METRIC,
-        choices=["height", "top_y"],
-        help="Forward stop metric used by go_to_tower().",
-    )
-    parser.add_argument(
         "--target-top-y-ratio",
         type=float,
         default=DEFAULT_TARGET_TOP_Y_RATIO,
         help="Target top-of-bbox y ratio used when --stop-metric=top_y.",
-    )
-    parser.add_argument(
-        "--selection-mode",
-        default="center",
-        choices=["center", "conf"],
-        help="How go_to_tower() chooses among multiple visible towers.",
     )
     return parser.parse_args()
 
@@ -94,18 +70,6 @@ def main():
             if args.command == "2":
                 print("Running place_down_tower()")
                 place_down_tower(ep_robot=ep_robot)
-            else:
-                print("Running go_to_tower()")
-                go_to_tower(
-                    ep_robot=ep_robot,
-                    model=model,
-                    ep_camera=ep_camera,
-                    conf_thresh=DEFAULT_DETECT_CONF,
-                    stop_metric=args.stop_metric,
-                    target_top_y_ratio=args.target_top_y_ratio,
-                    selection_mode=args.selection_mode,
-                    show=True,
-                )
     finally:
         ep_camera.stop_video_stream()
         ep_robot.close()
