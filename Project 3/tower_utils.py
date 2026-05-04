@@ -33,6 +33,56 @@ class Detection:
     cls: int
 
 
+def _start_arm_position_logging(ep_arm, enabled=False, freq=10):
+    """Subscribe to arm position updates and keep the latest value available."""
+    arm_state = {"enabled": enabled, "pos": None}
+    if not enabled:
+        return arm_state
+
+    def on_arm_position(pos_info):
+        pos_x, pos_y = pos_info
+        arm_state["pos"] = (pos_x, pos_y)
+        print(f"[Arm] live position x={pos_x}, y={pos_y}")
+
+    ep_arm.sub_position(freq=freq, callback=on_arm_position)
+    return arm_state
+
+
+def _stop_arm_position_logging(ep_arm, arm_state):
+    if arm_state["enabled"]:
+        ep_arm.unsub_position()
+
+
+def _print_latest_arm_position(arm_state, label):
+    if not arm_state["enabled"]:
+        return
+    if arm_state["pos"] is None:
+        print(f"[Arm] {label}: position not received yet")
+        return
+    pos_x, pos_y = arm_state["pos"]
+    print(f"[Arm] {label}: latest x={pos_x}, y={pos_y}")
+
+
+def print_current_arm_position(ep_robot, wait_seconds=0.5, freq=10):
+    """Subscribe briefly to the arm position feed and print the current position."""
+    ep_arm = ep_robot.robotic_arm
+    arm_state = _start_arm_position_logging(ep_arm, enabled=True, freq=freq)
+    try:
+        deadline = time.time() + wait_seconds
+        while arm_state["pos"] is None and time.time() < deadline:
+            time.sleep(0.05)
+
+        if arm_state["pos"] is None:
+            print("[Arm] current position not received")
+            return None
+
+        pos_x, pos_y = arm_state["pos"]
+        print(f"[Arm] current position x={pos_x}, y={pos_y}")
+        return arm_state["pos"]
+    finally:
+        _stop_arm_position_logging(ep_arm, arm_state)
+
+
 def resolve_resolution(name):
     if name == "720p":
         return camera.STREAM_720P
@@ -57,17 +107,23 @@ def move_arm_to_top(
     ep_robot,
     arm_x=DEFAULT_ARM_X,
     raised_y=DEFAULT_RAISED_Y,
+    arm_state=None,
 ):
     """Move the arm to the raised reference posture used for travel/calibration."""
     ep_robot.robotic_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
+    if arm_state is not None:
+        _print_latest_arm_position(arm_state, "after move_arm_to_top")
 
 def move_arm_to_default(
     ep_robot,
     default_x=0,
     default_y=0,
+    arm_state=None,
 ):
     """Move the arm to default position."""
     ep_robot.robotic_arm.moveto(x=default_x, y=default_y).wait_for_completed()
+    if arm_state is not None:
+        _print_latest_arm_position(arm_state, "after move_arm_to_default")
 
 
 def get_detections(model, frame, conf_thresh=DEFAULT_DETECT_CONF, target_class=None):
@@ -139,20 +195,25 @@ def pick_up_tower(
     raised_y=DEFAULT_RAISED_Y,
     gripper_power=DEFAULT_GRIPPER_POWER,
     grip_wait_seconds=DEFAULT_GRIPPER_WAIT_SECONDS,
+    log_arm_position=False,
 ):
     """Pick up a tower by lowering close-in first, then extending and lifting."""
     owns_robot = ep_robot is None
     if owns_robot:
         ep_robot = connect_robot(conn_type=conn_type, robot_ip=robot_ip, sn=sn)
 
+    arm_state = {"enabled": False, "pos": None}
     try:
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
+        arm_state = _start_arm_position_logging(ep_arm, enabled=log_arm_position)
 
         # Start from home, lower while retracted, then extend at that lowered height.
-        move_arm_to_default(ep_robot)
+        move_arm_to_default(ep_robot, arm_state=arm_state)
         ep_arm.moveto(x=0, y=lower_y).wait_for_completed()
+        _print_latest_arm_position(arm_state, "after lower while retracted")
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
+        _print_latest_arm_position(arm_state, "after extend to pickup")
 
         ep_gripper.close(power=gripper_power)
         time.sleep(grip_wait_seconds)
@@ -160,9 +221,12 @@ def pick_up_tower(
 
         # Lift first, then retract to a stable raised posture near the robot.
         ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
+        _print_latest_arm_position(arm_state, "after lift")
         ep_arm.moveto(x=0, y=raised_y).wait_for_completed()
+        _print_latest_arm_position(arm_state, "after retract raised")
         return ep_robot
     finally:
+        _stop_arm_position_logging(ep_robot.robotic_arm, arm_state)
         if owns_robot:
             ep_robot.close()
 
@@ -178,27 +242,33 @@ def place_down_tower(
     raised_y=DEFAULT_RAISED_Y,
     gripper_power=DEFAULT_GRIPPER_POWER,
     grip_wait_seconds=DEFAULT_GRIPPER_WAIT_SECONDS,
+    log_arm_position=False,
 ):
     """Place a tower by extending high, lowering, releasing, then returning home."""
     owns_robot = ep_robot is None
     if owns_robot:
         ep_robot = connect_robot(conn_type=conn_type, robot_ip=robot_ip, sn=sn)
 
+    arm_state = {"enabled": False, "pos": None}
     try:
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
+        arm_state = _start_arm_position_logging(ep_arm, enabled=log_arm_position)
 
         # Keep the arm high while moving forward, then lower to place.
         # ep_arm.moveto(x=0, y=raised_y).wait_for_completed() 
         ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
+        _print_latest_arm_position(arm_state, "after extend raised")
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
+        _print_latest_arm_position(arm_state, "after lower to place")
 
         ep_gripper.open(power=gripper_power)
         time.sleep(grip_wait_seconds)
         ep_gripper.pause()
 
-        move_arm_to_default(ep_robot)
+        move_arm_to_default(ep_robot, arm_state=arm_state)
         return ep_robot
     finally:
+        _stop_arm_position_logging(ep_robot.robotic_arm, arm_state)
         if owns_robot:
             ep_robot.close()

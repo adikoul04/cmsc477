@@ -5,6 +5,7 @@ from tower_utils import (
     load_model,
     pick_up_tower,
     place_down_tower,
+    print_current_arm_position,
     start_camera_stream,
 )
 
@@ -71,6 +72,16 @@ def parse_args():
         choices=["center", "conf"],
         help="How go_to_tower() chooses among multiple visible towers.",
     )
+    parser.add_argument(
+        "--log-arm-position",
+        action="store_true",
+        help="Subscribe to and print live robotic arm position during arm motions.",
+    )
+    parser.add_argument(
+        "--detecting-arm-position",
+        action="store_true",
+        help="Print the current robotic arm position before running the command.",
+    )
     return parser.parse_args()
 
 
@@ -86,13 +97,24 @@ def main():
     ep_camera = start_camera_stream(ep_robot, resolution=args.resolution)
 
     try:
+        if args.detecting_arm_position:
+            print("Reading current arm position...")
+            print_current_arm_position(ep_robot)
+            return
+
         if args.command == "1":
             print("Running pick_up_tower()")
-            pick_up_tower(ep_robot=ep_robot)
+            pick_up_tower(
+                ep_robot=ep_robot,
+                log_arm_position=args.log_arm_position,
+            )
         else:
             if args.command == "2":
                 print("Running place_down_tower()")
-                place_down_tower(ep_robot=ep_robot)
+                place_down_tower(
+                    ep_robot=ep_robot,
+                    log_arm_position=args.log_arm_position,
+                )
             else:
                 print("Running go_to_tower()")
                 # go_to_tower(
