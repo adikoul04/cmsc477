@@ -12,6 +12,7 @@ from robomaster import camera
 from config import (
     DEFAULT_APPROACH_Y,
     DEFAULT_ARM_X,
+    DEFAULT_ARM_Y,
     DEFAULT_DETECT_CONF,
     DEFAULT_GRIPPER_POWER,
     DEFAULT_GRIPPER_WAIT_SECONDS,
@@ -205,14 +206,28 @@ def pick_up_tower(
     arm_state = {"enabled": False, "pos": None}
     try:
         ep_arm = ep_robot.robotic_arm
+        ep_chassis = ep_robot.chassis
         ep_gripper = ep_robot.gripper
         arm_state = _start_arm_position_logging(ep_arm, enabled=log_arm_position)
 
+        # Open upon function call
+        ep_gripper.open(power=gripper_power)
+        time.sleep(grip_wait_seconds)
+        ep_gripper.pause()
+
         # Start from home, lower while retracted, then extend at that lowered height.
-        move_arm_to_default(ep_robot, arm_state=arm_state)
-        ep_arm.moveto(x=0, y=lower_y).wait_for_completed()
+        # move_arm_to_default(ep_robot, arm_state=arm_state)
+        # time.sleep(grip_wait_seconds)
+
+        ep_arm.moveto(x=200, y=lower_y).wait_for_completed()
+        time.sleep(grip_wait_seconds)
+
         _print_latest_arm_position(arm_state, "after lower while retracted")
-        ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
+        # ep_arm.moveto(x=225, y=lower_y).wait_for_completed()
+        # time.sleep(grip_wait_seconds)
+        ep_chassis.move(x=0.07, y=0, z=0, xy_speed=0.35).wait_for_completed()
+
+
         _print_latest_arm_position(arm_state, "after extend to pickup")
 
         ep_gripper.close(power=gripper_power)
@@ -220,9 +235,13 @@ def pick_up_tower(
         ep_gripper.pause()
 
         # Lift first, then retract to a stable raised posture near the robot.
-        ep_arm.moveto(x=arm_x, y=raised_y).wait_for_completed()
+        ep_arm.moveto(x=215, y=raised_y).wait_for_completed()
+        time.sleep(grip_wait_seconds)
+        
         _print_latest_arm_position(arm_state, "after lift")
-        ep_arm.moveto(x=0, y=raised_y).wait_for_completed()
+        ep_arm.moveto(x=DEFAULT_ARM_X, y=DEFAULT_ARM_Y).wait_for_completed()
+        time.sleep(grip_wait_seconds)
+
         _print_latest_arm_position(arm_state, "after retract raised")
         return ep_robot
     finally:
@@ -251,6 +270,7 @@ def place_down_tower(
 
     arm_state = {"enabled": False, "pos": None}
     try:
+        ep_chassis = ep_robot.chassis
         ep_arm = ep_robot.robotic_arm
         ep_gripper = ep_robot.gripper
         arm_state = _start_arm_position_logging(ep_arm, enabled=log_arm_position)
@@ -266,7 +286,11 @@ def place_down_tower(
         time.sleep(grip_wait_seconds)
         ep_gripper.pause()
 
-        move_arm_to_default(ep_robot, arm_state=arm_state)
+        ep_chassis.move(x=-0.07, y=0, z=0, xy_speed=0.35).wait_for_completed()
+
+        ep_arm.moveto(x=DEFAULT_ARM_X, y=DEFAULT_ARM_Y).wait_for_completed()
+
+        # move_arm_to_default(ep_robot, arm_state=arm_state)
         return ep_robot
     finally:
         _stop_arm_position_logging(ep_robot.robotic_arm, arm_state)
