@@ -90,7 +90,7 @@ K_CAM = np.array(
 )
 
 TAG_FAMILY    = "tag36h11"
-TAG_SIZE_M    = 0.15    # physical side-length of the ArUco tags in metres; adjust!
+TAG_SIZE_M    = 0.2    # physical side-length of the ArUco tags in metres; adjust!
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ArUco tag ID groups
