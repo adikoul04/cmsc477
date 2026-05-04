@@ -63,8 +63,8 @@ from tower_utils import (
 # Robot / model connection constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-ROBOT_IP   = "192.168.50.118"
-ROBOT_SN   = "3JKCH8800100WM"
+ROBOT_IP   = "192.168.50.117"
+ROBOT_SN   = "3JKCH8800100RC"
 MODEL_PATH = r"C:\Users\dutta\Documents\cmsc477\runs\detect\train5\weights\best.pt"
 
 # ─────────────────────────────────────────────────────────────────────────────
