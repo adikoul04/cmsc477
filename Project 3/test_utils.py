@@ -1,19 +1,20 @@
 import argparse
 
 from tower_utils import (
-    DEFAULT_DETECT_CONF,
-    DEFAULT_MODEL_PATH,
-    DEFAULT_ROBOT_IP,
-    DEFAULT_ROBOT_SN,
-    DEFAULT_STOP_METRIC,
-    DEFAULT_TARGET_TOP_Y_RATIO,
     connect_robot,
-    go_to_tower,
     load_model,
     pick_up_tower,
     place_down_tower,
     start_camera_stream,
 )
+
+from config import (
+    DEFAULT_DETECT_CONF,
+    DEFAULT_MODEL_PATH,
+    DEFAULT_ROBOT_IP,
+    DEFAULT_ROBOT_SN,
+    DEFAULT_STOP_METRIC,
+    DEFAULT_TARGET_TOP_Y_RATIO,)
 
 
 def parse_args():
@@ -94,16 +95,16 @@ def main():
                 place_down_tower(ep_robot=ep_robot)
             else:
                 print("Running go_to_tower()")
-                go_to_tower(
-                    ep_robot=ep_robot,
-                    model=model,
-                    ep_camera=ep_camera,
-                    conf_thresh=DEFAULT_DETECT_CONF,
-                    stop_metric=args.stop_metric,
-                    target_top_y_ratio=args.target_top_y_ratio,
-                    selection_mode=args.selection_mode,
-                    show=True,
-                )
+                # go_to_tower(
+                #     ep_robot=ep_robot,
+                #     model=model,
+                #     ep_camera=ep_camera,
+                #     conf_thresh=DEFAULT_DETECT_CONF,
+                #     stop_metric=args.stop_metric,
+                #     target_top_y_ratio=args.target_top_y_ratio,
+                #     selection_mode=args.selection_mode,
+                #     show=True,
+                # )
     finally:
         ep_camera.stop_video_stream()
         ep_robot.close()
