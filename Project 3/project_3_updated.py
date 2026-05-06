@@ -67,6 +67,7 @@ from tower_utils import Detection, get_detections, pick_up_tower, place_down_tow
 
 
 FT_TO_M = 0.3048
+# The arena dimensions and start pose are hard-coded from the updated setup.
 WORKSPACE_W_M = 10.0 * FT_TO_M
 WORKSPACE_H_M = 10.0 * FT_TO_M
 START_X_M = 1.0 * FT_TO_M
@@ -95,6 +96,7 @@ DISTANCE_CORRECTION_OFFSET = -0.27464788732394363
 
 @dataclass
 class Pose2D:
+    """Robot pose in the global workspace frame."""
     x: float
     y: float
     yaw: float
@@ -102,6 +104,7 @@ class Pose2D:
 
 @dataclass
 class Landmark:
+    """A mapped world object represented by a single 2-D point."""
     kind: str
     x: float
     y: float
@@ -110,6 +113,7 @@ class Landmark:
 
 @dataclass
 class WorldMap:
+    """Persistent map state for the deterministic mission."""
     recharge: Optional[Landmark] = None
     small_goal: Optional[Landmark] = None
     large_goal: Optional[Landmark] = None
@@ -124,6 +128,8 @@ class WorldMap:
         return None
 
     def set_goal(self, kind: str, x: float, y: float, tag_id: int) -> Landmark:
+        # The course only has one small-goal zone and one large-goal zone, so
+        # later observations overwrite earlier ones for that specific goal kind.
         landmark = Landmark(kind=kind, x=x, y=y, tag_id=tag_id)
         if kind == "small_goal":
             self.small_goal = landmark
@@ -132,6 +138,7 @@ class WorldMap:
         return landmark
 
     def add_or_update_obstacle(self, x: float, y: float) -> Landmark:
+        # Obstacles are merged when repeated centered observations land nearby.
         for obstacle in self.obstacles:
             if math.hypot(obstacle.x - x, obstacle.y - y) <= OBSTACLE_MERGE_RADIUS_M:
                 obstacle.x = 0.5 * (obstacle.x + x)
@@ -142,6 +149,8 @@ class WorldMap:
         return obstacle
 
     def right_side_goal(self) -> Optional[Landmark]:
+        # The updated mission description uses the right-side mapped goal as the
+        # repeated delivery target.
         goals = [goal for goal in [self.small_goal, self.large_goal] if goal is not None]
         if not goals:
             return None
@@ -173,6 +182,7 @@ class WorldMap:
 
 
 class BatteryManager:
+    """Minimal simulated battery model driven by the brick class being carried."""
     def __init__(self, start_pct: float = BATTERY_START_PCT):
         self.level = float(start_pct)
 
@@ -194,6 +204,7 @@ class BatteryManager:
 
 
 class AprilTagDetector:
+    """Small wrapper so the rest of the file stays agnostic to detector details."""
     def __init__(self, K: np.ndarray = K_CAM, family: str = TAG_FAMILY, marker_size_m: float = TAG_SIZE_M):
         self.camera_params = [float(K[0, 0]), float(K[1, 1]), float(K[0, 2]), float(K[1, 2])]
         self.detector = pupil_apriltags.Detector(
@@ -260,6 +271,8 @@ def world_from_range_and_bearing(pose: Pose2D, range_m: float, bearing_rad: floa
 
 
 def estimate_bbox_distance_m(detection: Detection, cls: Optional[int] = None) -> Optional[float]:
+    # This mirrors the live-feed calibration so the map and the overlay use the
+    # same object-to-distance relationship.
     object_class = detection.cls if cls is None else cls
     object_height_m = OBJECT_HEIGHTS_M.get(object_class)
     if object_height_m is None:
@@ -271,6 +284,8 @@ def estimate_bbox_distance_m(detection: Detection, cls: Optional[int] = None) ->
 
 
 def detection_world_position(detection: Detection, pose: Pose2D) -> Optional[Tuple[float, float]]:
+    # Convert a centered camera observation into a 2-D world point using the
+    # current dead-reckoned pose plus the calibrated range estimate.
     distance_m = estimate_bbox_distance_m(detection)
     if distance_m is None:
         return None
@@ -288,8 +303,12 @@ def move_robot(
     xy_speed: float = MOVE_SPEED_MPS,
     z_speed: float = TURN_SPEED_DPS,
 ) -> None:
+    # `chassis.move(...)` is the preferred motion primitive for planned travel
+    # because it drifts less than `drive_speed(...)` on this robot.
     ep_chassis.move(x=x_m, y=y_m, z=z_deg, xy_speed=xy_speed, z_speed=z_speed).wait_for_completed()
 
+    # RoboMaster translations are commanded in the robot body frame, so we
+    # rotate that motion into the global workspace frame before updating pose.
     world_dx = x_m * math.cos(pose.yaw) - y_m * math.sin(pose.yaw)
     world_dy = x_m * math.sin(pose.yaw) + y_m * math.cos(pose.yaw)
     pose.x += world_dx
@@ -299,6 +318,8 @@ def move_robot(
 
 
 def integrate_drive_speed(pose: Pose2D, vx: float, vy: float, wz_deg_s: float, dt_s: float) -> None:
+    # Only used during tag servo, where motion is applied as short velocity
+    # bursts instead of a single `move(...)` command.
     world_dx = (vx * math.cos(pose.yaw) - vy * math.sin(pose.yaw)) * dt_s
     world_dy = (vx * math.sin(pose.yaw) + vy * math.cos(pose.yaw)) * dt_s
     pose.x += world_dx
@@ -307,6 +328,8 @@ def integrate_drive_speed(pose: Pose2D, vx: float, vy: float, wz_deg_s: float, d
 
 
 def turn_to_yaw(ep_chassis, pose: Pose2D, target_yaw_rad: float) -> None:
+    # Turn with the high-level move command so the yaw update stays consistent
+    # with the global pose tracker.
     delta_deg = math.degrees(wrap_to_pi(target_yaw_rad - pose.yaw))
     if abs(delta_deg) < 1.0:
         return
@@ -314,6 +337,8 @@ def turn_to_yaw(ep_chassis, pose: Pose2D, target_yaw_rad: float) -> None:
 
 
 def navigate_to_point(ep_chassis, pose: Pose2D, target_x: float, target_y: float, stop_dist_m: float = 0.0) -> None:
+    # Simple point-to-point navigation: face the target, then translate along
+    # the robot forward axis.
     dx = target_x - pose.x
     dy = target_y - pose.y
     distance_m = math.hypot(dx, dy)
@@ -325,6 +350,7 @@ def navigate_to_point(ep_chassis, pose: Pose2D, target_x: float, target_y: float
 
 
 def detect_tags_and_objects(frame: np.ndarray, yolo_model: YOLO, tag_detector: AprilTagDetector) -> Tuple[list, List[Detection]]:
+    # Mapping and servo loops usually need both detectors on the same frame.
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.uint8)
     try:
         tags = tag_detector.find_tags(gray)
@@ -368,6 +394,8 @@ def map_goal_from_view(
     valid_ids: Iterable[int],
     label: str,
 ) -> Landmark:
+    # The initial goal and opposite goal are mapped directly from the observed
+    # AprilTag range and horizontal bearing.
     frame, tag = wait_for_goal_tag(ep_camera, yolo_model, tag_detector, valid_ids, timeout_s=6.0)
     if tag is None:
         raise RuntimeError(f"Could not detect {label} goal tag.")
@@ -390,6 +418,9 @@ def map_recharge_from_box(
     pose: Pose2D,
     world_map: WorldMap,
 ) -> Landmark:
+    # In the described setup the recharge station is first observed as the left
+    # face of a box, so this step uses YOLO + calibrated box distance instead
+    # of requiring the recharge tag to be visible immediately.
     deadline = time.time() + 6.0
     while time.time() < deadline:
         frame = read_frame(ep_camera, timeout=0.5)
@@ -420,6 +451,8 @@ def scan_left_and_map_world(
     world_map: WorldMap,
     initial_goal_kind: str,
 ) -> Landmark:
+    # After moving forward 2 ft, the robot translates left and opportunistically
+    # maps centered obstacles until it eventually reaches the opposite goal zone.
     opposite_goal_kind = "large_goal" if initial_goal_kind == "small_goal" else "small_goal"
     opposite_ids = LARGE_GOAL_TAG_IDS if opposite_goal_kind == "large_goal" else SMALL_GOAL_TAG_IDS
 
@@ -430,6 +463,8 @@ def scan_left_and_map_world(
             tags, detections = detect_tags_and_objects(frame, yolo_model, tag_detector)
 
             if len(world_map.obstacles) < 2:
+                # Only commit obstacle positions when the box is horizontally
+                # centered, which matches the user's mapping constraint.
                 boxes = [det for det in detections if det.cls == CLASS_BOX]
                 centered_boxes = [det for det in boxes if abs(center_error_px(det.cx)) <= CENTER_TOL_PX]
                 for box in centered_boxes:
@@ -467,6 +502,8 @@ def map_loading_dock(
     pose: Pose2D,
     world_map: WorldMap,
 ) -> Landmark:
+    # The loading dock has no tag in this workflow, so we treat the visible
+    # tower clump as a set of detections whose centroid becomes the dock point.
     for _ in range(MAX_TAG_SEARCH_STEPS):
         frame = read_frame(ep_camera, timeout=0.5)
         if frame is not None:
@@ -499,6 +536,8 @@ def servo_to_visible_tag(
     target_dist_m: float,
     timeout_s: float = 15.0,
 ) -> bool:
+    # `drive_speed(...)` is intentionally limited to this close-range visual
+    # servo loop where we need fast incremental corrections.
     valid_set = set(valid_ids)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
@@ -508,6 +547,7 @@ def servo_to_visible_tag(
         tags, _ = detect_tags_and_objects(frame, yolo_model, tag_detector)
         matches = [tag for tag in tags if int(tag.tag_id) in valid_set]
         if not matches:
+            # If the tag is not visible, rotate slowly in place until it appears.
             wz = 10.0
             dt = 0.15
             ep_chassis.drive_speed(x=0.0, y=0.0, z=wz, timeout=dt)
@@ -543,6 +583,8 @@ def approach_brick_with_move(
     target_class: int,
     timeout_s: float = 20.0,
 ) -> bool:
+    # Brick pickup stays in the higher-level `move(...)` regime. The robot uses
+    # bbox center and bbox height to nudge itself into a repeatable pickup pose.
     deadline = time.time() + timeout_s
     stable = 0
     desired_height_px = 160.0
@@ -554,6 +596,8 @@ def approach_brick_with_move(
 
         detections = get_detections(yolo_model, frame, conf_thresh=0.40, target_class=target_class)
         if not detections:
+            # Small search turns are enough here because the dock should already
+            # be roughly in front of the robot once navigation completes.
             move_robot(ep_chassis, pose, z_deg=10.0)
             continue
 
@@ -587,6 +631,8 @@ def align_to_goal_and_drop(
     pose: Pose2D,
     goal: Landmark,
 ) -> None:
+    # Navigate to the mapped goal first, then refine with a tag servo so the
+    # final placement lines up with the actual drop-off face.
     goal_ids = SMALL_GOAL_TAG_IDS if goal.kind == "small_goal" else LARGE_GOAL_TAG_IDS
     navigate_to_point(ep_chassis, pose, goal.x, goal.y, stop_dist_m=LANDMARK_STOP_DIST_M)
     success = servo_to_visible_tag(
@@ -612,6 +658,8 @@ def recharge_robot(
     world_map: WorldMap,
     battery: BatteryManager,
 ) -> None:
+    # Recharge uses the same pattern as delivery: coarse move to the mapped
+    # landmark, then fine servo to the visible recharge tag(s).
     if world_map.recharge is None:
         raise RuntimeError("Recharge requested before recharge landmark was mapped.")
 
@@ -641,6 +689,8 @@ def execute_mapping_sequence(
     pose: Pose2D,
     world_map: WorldMap,
 ) -> Landmark:
+    # This function encodes the exact deterministic startup path described by
+    # the user rather than performing a generic exploratory sweep.
     initial_goal = map_goal_from_view(
         ep_camera,
         yolo_model,
@@ -654,6 +704,8 @@ def execute_mapping_sequence(
     move_robot(ep_chassis, pose, z_deg=90.0)
     map_recharge_from_box(ep_camera, yolo_model, tag_detector, pose, world_map)
 
+    # Return to the original heading, move 2 ft forward, then begin the leftward
+    # scan that maps the two obstacles and the opposite goal.
     move_robot(ep_chassis, pose, z_deg=-90.0)
     move_robot(ep_chassis, pose, x_m=INITIAL_FORWARD_STEP_M)
 
@@ -685,6 +737,8 @@ def run_delivery_loop(
     target_goal: Landmark,
     max_deliveries: int,
 ) -> None:
+    # Once mapping is complete, the mission collapses into a simple repeated
+    # route: dock -> target goal -> dock, with recharge inserted as needed.
     if world_map.dock is None:
         raise RuntimeError("Delivery loop started before mapping the loading dock.")
 
@@ -693,6 +747,8 @@ def run_delivery_loop(
 
     deliveries = 0
     while deliveries < max_deliveries:
+        # Recharge before pickup if this battery level cannot support one more
+        # brick of the required class.
         if not battery.can_pick(target_class):
             recharge_robot(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map, battery)
 
@@ -710,6 +766,7 @@ def run_delivery_loop(
 
 
 def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> None:
+    """Render the mapped landmarks as a simple bird's-eye debugging plot."""
     try:
         import matplotlib.pyplot as plt
         import matplotlib.patches as patches
@@ -789,6 +846,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Main boot sequence:
+    # 1. Connect hardware.
+    # 2. Move arm to default pose.
+    # 3. Run the deterministic mapping path.
+    # 4. Optionally start repeated deliveries.
     args = parse_args()
 
     print("=== Project 3 Updated Workflow ===")
