@@ -5,14 +5,15 @@ import numpy as np
 
 # Project paths
 PROJECT_DIR = Path(__file__).resolve().parent
-MODEL_CANDIDATES = (
-    PROJECT_DIR / "cmsc477_yolo" / "runs" / "detect" / "train" / "weights" / "best.pt",
-    Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt",
-)
-DEFAULT_MODEL_PATH = next(
-    (candidate for candidate in MODEL_CANDIDATES if candidate.exists()),
-    MODEL_CANDIDATES[-1],
-)
+# MODEL_CANDIDATES = (
+#     PROJECT_DIR / "cmsc477_yolo" / "runs" / "detect" / "train" / "weights" / "best.pt",
+#     Path(__file__).resolve().parents[1] / "runs" / "detect" / "train5" / "weights" / "best.pt",
+# )
+# DEFAULT_MODEL_PATH = next(
+#     (candidate for candidate in MODEL_CANDIDATES if candidate.exists()),
+#     MODEL_CANDIDATES[-1],
+# )
+DEFAULT_MODEL_PATH = PROJECT_DIR / "final_model.pt"
 
 
 # Robot connection
@@ -43,9 +44,9 @@ TAG_SIZE_M = 0.2
 
 
 # Arena landmarks
-RECHARGE_TAG_IDS = {8, 10}
-SMALL_GOAL_TAG_IDS = {27, 30}
-LARGE_GOAL_TAG_IDS = {34, 38}
+RECHARGE_TAG_IDS = {34, 38}
+SMALL_GOAL_TAG_IDS = {11, 41}
+LARGE_GOAL_TAG_IDS = {45, 19}
 ALL_LANDMARK_TAG_IDS = RECHARGE_TAG_IDS | SMALL_GOAL_TAG_IDS | LARGE_GOAL_TAG_IDS
 
 
@@ -127,9 +128,9 @@ BRICK_SERVO_STABLE_THRESH = 4
 
 
 # Loading dock color segmentation
-PURPLE_HSV_LO = np.array([125, 60, 40], dtype=np.uint8)
-PURPLE_HSV_HI = np.array([155, 255, 255], dtype=np.uint8)
-PURPLE_MIN_AREA_PX = 1500
+# PURPLE_HSV_LO = np.array([125, 60, 40], dtype=np.uint8)
+# PURPLE_HSV_HI = np.array([155, 255, 255], dtype=np.uint8)
+# PURPLE_MIN_AREA_PX = 1500
 
 
 # Robotic arm positions
