@@ -26,7 +26,9 @@ MODEL_PATH = DEFAULT_MODEL_PATH
 # Arena geometry
 ARENA_W_M = 3.048
 ARENA_H_M = 3.048
+SAFE_BOUNDARY_MARGIN_M = 0.20
 SIDE1_Y_LIMIT = 1.0
+SIDE2_Y_START = 2.0
 
 
 # Camera and AprilTag localization
