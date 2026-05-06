@@ -21,7 +21,7 @@ from ultralytics import YOLO
 
 
 # Load project config (absolute path)
-CONFIG_PATH = "/Users/adikoul/Desktop/CMSC477/CMSC477 Group Code/Project 3/config.py"
+CONFIG_PATH = "./config.py"
 spec = importlib.util.spec_from_file_location("proj3_config", CONFIG_PATH)
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
@@ -106,7 +106,7 @@ def main():
     ep_robot.initialize(conn_type="sta", sn=str(getattr(config, 'ROBOT_SN', '')))
 
     ep_camera = ep_robot.camera
-    ep_camera.start_video_stream(display=False, resolution=rm_camera.STREAM_360P)
+    ep_camera.start_video_stream(display=False, resolution=rm_camera.STREAM_720P)
 
     # Load YOLO model
     print(f"Loading YOLO model from {config.MODEL_PATH}")

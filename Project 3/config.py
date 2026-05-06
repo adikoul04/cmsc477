@@ -13,7 +13,10 @@ PROJECT_DIR = Path(__file__).resolve().parent
 #     (candidate for candidate in MODEL_CANDIDATES if candidate.exists()),
 #     MODEL_CANDIDATES[-1],
 # )
-DEFAULT_MODEL_PATH = PROJECT_DIR / "final_model.pt"
+# DEFAULT_MODEL_PATH = PROJECT_DIR / "final_yolo.pt"
+# DEFAULT_MODEL_PATH = PROJECT_DIR / "last.pt"
+DEFAULT_MODEL_PATH = PROJECT_DIR / "new_best.pt"
+
 
 
 # Robot connection
@@ -53,8 +56,8 @@ ALL_LANDMARK_TAG_IDS = RECHARGE_TAG_IDS | SMALL_GOAL_TAG_IDS | LARGE_GOAL_TAG_ID
 # YOLO class IDs
 CLASS_CONE = 0
 CLASS_BOX = 1
-CLASS_SMALL_BRICK = 2
-CLASS_LARGE_BRICK = 3
+CLASS_SMALL_BRICK = 3
+CLASS_LARGE_BRICK = 2
 
 
 # Battery management
