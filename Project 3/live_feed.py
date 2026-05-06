@@ -34,16 +34,28 @@ CLASS_NAMES = {
     config.CLASS_LARGE_BRICK: "large_brick",
 }
 
+# Camera-to-robot extrinsics from config. This is not yet used by the simple
+# bbox-height estimator below, but it is the transform to use for a tilt-aware
+# ground-plane distance model.
+EXTRINSIC_MATRIX = config.T_ROBOT_FROM_CAMERA
+
 # Distance estimation tuning:
 # - Update OBJECT_HEIGHTS_M with the real physical object heights in meters.
-# - Update DISTANCE_SCALE if the camera intrinsics or bounding-box fitting causes a
-#   consistent bias after real-world testing. Values > 1.0 increase the estimate.
+# - Update RAW_DISTANCE_SCALE if the camera intrinsics or bounding-box fitting causes a
+#   consistent multiplicative bias before correction.
+# - Update DISTANCE_CORRECTION_SLOPE and DISTANCE_CORRECTION_OFFSET after measuring
+#   a few real distances. corrected = slope * raw_distance + offset.
+# - The current correction is fit from:
+#     raw 0.48 m -> real 0.30 m
+#     raw 1.90 m -> real 2.00 m
 OBJECT_HEIGHTS_M = {
-    config.CLASS_BOX: 0.20,
-    config.CLASS_SMALL_BRICK: 0.06,
-    config.CLASS_LARGE_BRICK: 0.10,
+    config.CLASS_BOX: 0.28,
+    config.CLASS_SMALL_BRICK: 0.1,
+    config.CLASS_LARGE_BRICK: 0.19,
 }
-DISTANCE_SCALE = 1.0
+RAW_DISTANCE_SCALE = 2.0
+DISTANCE_CORRECTION_SLOPE = 1.1971830985915493
+DISTANCE_CORRECTION_OFFSET = -0.27464788732394363
 
 
 def make_apriltag_detector(K, family: str = "tag36h11", threads: int = 2, marker_size_m: float = 0.16):
@@ -67,7 +79,9 @@ def estimate_distance_m(box, camera_matrix) -> float | None:
         return None
 
     focal_length_y_px = float(camera_matrix[1, 1])
-    return DISTANCE_SCALE * focal_length_y_px * object_height_m / float(pixel_height)
+    raw_distance_m = RAW_DISTANCE_SCALE * focal_length_y_px * object_height_m / float(pixel_height)
+    # corrected_distance_m = DISTANCE_CORRECTION_SLOPE * raw_distance_m + DISTANCE_CORRECTION_OFFSET
+    return max(0.0, raw_distance_m)
 
 
 def draw_yolo_boxes(frame, boxes, camera_matrix):

@@ -42,6 +42,76 @@ K_CAM = np.array(
      [0.0, 0.0, 1.0]],
     dtype=float,
 )
+
+# Camera extrinsics (camera frame -> robot frame).
+# Measure these on the real robot:
+# - CAM_OFFSET_X_M: forward distance from robot origin to camera center.
+# - CAM_OFFSET_Y_M: left/right distance from robot origin to camera center.
+# - CAM_OFFSET_Z_M: vertical distance from robot origin to camera center.
+# - CAM_ROLL_DEG: camera roll angle.
+# - CAM_PITCH_DEG: downward tilt angle. Downward-facing cameras usually need a
+#   negative pitch if +x is forward, +y is down in the camera frame.
+# - CAM_YAW_DEG: camera yaw offset relative to the robot forward axis.
+#
+# A practical way to measure them:
+# 1. Pick a robot origin, usually the chassis center on the ground plane.
+# 2. Measure the camera lens center position relative to that origin in meters.
+# 3. Measure pitch with a phone inclinometer or by fitting against known points.
+# 4. Measure yaw/roll if the camera is not mounted square to the chassis.
+CAM_OFFSET_X_M = 0.0
+CAM_OFFSET_Y_M = 0.0
+CAM_OFFSET_Z_M = 0.32
+CAM_ROLL_DEG = 0.0
+CAM_PITCH_DEG = -19.6
+CAM_YAW_DEG = 0.0
+
+
+def _rotx(theta_rad: float) -> np.ndarray:
+    c = np.cos(theta_rad)
+    s = np.sin(theta_rad)
+    return np.array(
+        [[1.0, 0.0, 0.0],
+         [0.0, c, -s],
+         [0.0, s, c]],
+        dtype=float,
+    )
+
+
+def _roty(theta_rad: float) -> np.ndarray:
+    c = np.cos(theta_rad)
+    s = np.sin(theta_rad)
+    return np.array(
+        [[c, 0.0, s],
+         [0.0, 1.0, 0.0],
+         [-s, 0.0, c]],
+        dtype=float,
+    )
+
+
+def _rotz(theta_rad: float) -> np.ndarray:
+    c = np.cos(theta_rad)
+    s = np.sin(theta_rad)
+    return np.array(
+        [[c, -s, 0.0],
+         [s, c, 0.0],
+         [0.0, 0.0, 1.0]],
+        dtype=float,
+    )
+
+
+CAM_R_ROBOT_FROM_CAMERA = (
+    _rotz(np.deg2rad(CAM_YAW_DEG))
+    @ _roty(np.deg2rad(CAM_PITCH_DEG))
+    @ _rotx(np.deg2rad(CAM_ROLL_DEG))
+)
+CAM_T_ROBOT_FROM_CAMERA_M = np.array(
+    [CAM_OFFSET_X_M, CAM_OFFSET_Y_M, CAM_OFFSET_Z_M],
+    dtype=float,
+)
+T_ROBOT_FROM_CAMERA = np.eye(4, dtype=float)
+T_ROBOT_FROM_CAMERA[:3, :3] = CAM_R_ROBOT_FROM_CAMERA
+T_ROBOT_FROM_CAMERA[:3, 3] = CAM_T_ROBOT_FROM_CAMERA_M
+
 TAG_FAMILY = "tag36h11"
 TAG_SIZE_M = 0.2
 
