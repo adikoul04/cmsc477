@@ -43,15 +43,24 @@ K_CAM = np.array(
     dtype=float,
 )
 
-# Camera extrinsics (camera frame -> robot frame).
+# Camera extrinsics (camera optical frame -> robot frame).
+# AprilTag/OpenCV camera frame convention:
+# - +x points right in the image
+# - +y points down in the image
+# - +z points forward out of the camera
+#
+# Robot frame convention assumed by the navigation code:
+# - +x forward
+# - +y left
+# - +z up
+#
 # Measure these on the real robot:
 # - CAM_OFFSET_X_M: forward distance from robot origin to camera center.
 # - CAM_OFFSET_Y_M: left/right distance from robot origin to camera center.
 # - CAM_OFFSET_Z_M: vertical distance from robot origin to camera center.
-# - CAM_ROLL_DEG: camera roll angle.
-# - CAM_PITCH_DEG: downward tilt angle. Downward-facing cameras usually need a
-#   negative pitch if +x is forward, +y is down in the camera frame.
-# - CAM_YAW_DEG: camera yaw offset relative to the robot forward axis.
+# - CAM_ROLL_DEG: roll of the mounted camera relative to its nominal forward-facing mount.
+# - CAM_PITCH_DEG: downward tilt of the mounted camera. Negative means pitched downward.
+# - CAM_YAW_DEG: yaw offset of the mounted camera relative to robot forward.
 #
 # A practical way to measure them:
 # 1. Pick a robot origin, usually the chassis center on the ground plane.
@@ -99,11 +108,28 @@ def _rotz(theta_rad: float) -> np.ndarray:
     )
 
 
-CAM_R_ROBOT_FROM_CAMERA = (
+# Base alignment from the OpenCV optical frame to the robot body frame for a
+# forward-facing camera with zero mount offsets:
+# - camera +z (forward) -> robot +x (forward)
+# - camera +x (right)   -> robot -y (right is negative-left)
+# - camera +y (down)    -> robot -z (down is negative-up)
+CAM_R_ROBOT_FROM_CAMERA_BASE = np.array(
+    [
+        [0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+    ],
+    dtype=float,
+)
+
+# Mount attitude relative to the nominal forward-facing camera mount.
+CAM_R_MOUNT = (
     _rotz(np.deg2rad(CAM_YAW_DEG))
     @ _roty(np.deg2rad(CAM_PITCH_DEG))
     @ _rotx(np.deg2rad(CAM_ROLL_DEG))
 )
+
+CAM_R_ROBOT_FROM_CAMERA = CAM_R_ROBOT_FROM_CAMERA_BASE @ CAM_R_MOUNT
 CAM_T_ROBOT_FROM_CAMERA_M = np.array(
     [CAM_OFFSET_X_M, CAM_OFFSET_Y_M, CAM_OFFSET_Z_M],
     dtype=float,

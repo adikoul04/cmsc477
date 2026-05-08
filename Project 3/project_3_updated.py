@@ -56,6 +56,7 @@ from config import (
     ROBOT_IP,
     ROBOT_SN,
     SMALL_GOAL_TAG_IDS,
+    T_ROBOT_FROM_CAMERA,
     TAG_FAMILY,
     TAG_SIZE_M,
     TURN_SPEED_DPS,
@@ -70,18 +71,25 @@ FT_TO_M = 0.3048
 # The arena dimensions and start pose are hard-coded from the updated setup.
 WORKSPACE_W_M = 10.0 * FT_TO_M
 WORKSPACE_H_M = 10.0 * FT_TO_M
-START_X_M = 1.0 * FT_TO_M
-START_Y_M = 1.0 * FT_TO_M
+# The robot starts in the top-left corner with a small safety margin from the
+# boundary, facing downward so the lower-left goal is visible first.
+START_X_M = 0.20
+START_Y_M = 0.20
 START_YAW_RAD = math.pi / 2.0
 INITIAL_FORWARD_STEP_M = 2.0 * FT_TO_M
 LEFT_SCAN_STEP_M = 0.18
 CENTER_TOL_PX = 35.0
 OBSTACLE_MERGE_RADIUS_M = 0.30
+OBSTACLE_PATH_CLEARANCE_M = 0.38
+OBSTACLE_DETOUR_MARGIN_M = 0.28
 LANDMARK_STOP_DIST_M = 0.55
 GOAL_SERVO_DIST_M = 0.30
 RECHARGE_SERVO_DIST_M = 0.22
 DOCK_SEARCH_STEP_DEG = 15.0
 MAX_TAG_SEARCH_STEPS = 24
+REFERENCE_CENTER_TOL_PX = 25.0
+REFERENCE_DIST_TOL_M = 0.18
+INTERMEDIATE_SNAP_DIST_M = 0.12
 
 # Calibrated distance model copied from live_feed.py.
 OBJECT_HEIGHTS_M = {
@@ -112,12 +120,27 @@ class Landmark:
 
 
 @dataclass
+class TagReference:
+    """Reference drop-off tag view used to re-localize from the relay point."""
+    tag_id: int
+    goal_kind: str
+    world_x: float
+    world_y: float
+    world_yaw: float
+    reference_pose: Pose2D
+    reference_distance_m: float
+    reference_center_x_px: float
+
+
+@dataclass
 class WorldMap:
     """Persistent map state for the deterministic mission."""
     recharge: Optional[Landmark] = None
     small_goal: Optional[Landmark] = None
     large_goal: Optional[Landmark] = None
     dock: Optional[Landmark] = None
+    intermediate: Optional[Landmark] = None
+    dropoff_tag_ref: Optional[TagReference] = None
     obstacles: List[Landmark] = field(default_factory=list)
 
     def goal_for_kind(self, kind: str) -> Optional[Landmark]:
@@ -176,6 +199,7 @@ class WorldMap:
                 f"  small_goal: {fmt(self.small_goal)}",
                 f"  large_goal: {fmt(self.large_goal)}",
                 f"  dock: {fmt(self.dock)}",
+                f"  intermediate: {fmt(self.intermediate)}",
                 f"  obstacles: {len(self.obstacles)}",
             ]
         )
@@ -251,6 +275,35 @@ def brick_class_for_goal(goal: Landmark) -> int:
     return CLASS_SMALL_BRICK if goal.kind == "small_goal" else CLASS_LARGE_BRICK
 
 
+def rotz(yaw_rad: float) -> np.ndarray:
+    c = math.cos(yaw_rad)
+    s = math.sin(yaw_rad)
+    return np.array(
+        [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]],
+        dtype=float,
+    )
+
+
+def transform_from_rt(R: np.ndarray, t: np.ndarray) -> np.ndarray:
+    T = np.eye(4, dtype=float)
+    T[:3, :3] = np.array(R, dtype=float).reshape(3, 3)
+    T[:3, 3] = np.array(t, dtype=float).reshape(3)
+    return T
+
+
+def invert_transform(T: np.ndarray) -> np.ndarray:
+    R = T[:3, :3]
+    t = T[:3, 3]
+    Ti = np.eye(4, dtype=float)
+    Ti[:3, :3] = R.T
+    Ti[:3, 3] = -R.T @ t
+    return Ti
+
+
+def yaw_from_rotation(R: np.ndarray) -> float:
+    return math.atan2(float(R[1, 0]), float(R[0, 0]))
+
+
 def read_frame(ep_camera, timeout: float = 1.0) -> Optional[np.ndarray]:
     try:
         frame = ep_camera.read_cv2_image(strategy="newest", timeout=timeout)
@@ -268,6 +321,89 @@ def world_from_range_and_bearing(pose: Pose2D, range_m: float, bearing_rad: floa
     world_x = pose.x + range_m * math.cos(heading)
     world_y = pose.y + range_m * math.sin(heading)
     return world_x, world_y
+
+
+def copy_pose(pose: Pose2D) -> Pose2D:
+    return Pose2D(x=pose.x, y=pose.y, yaw=pose.yaw)
+
+
+def clamp_to_workspace(x: float, y: float) -> Tuple[float, float]:
+    return (
+        min(max(0.0, x), WORKSPACE_W_M),
+        min(max(0.0, y), WORKSPACE_H_M),
+    )
+
+
+def point_to_segment_distance(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+    abx = bx - ax
+    aby = by - ay
+    denom = abx * abx + aby * aby
+    if denom <= 1e-9:
+        return math.hypot(px - ax, py - ay)
+    t = ((px - ax) * abx + (py - ay) * aby) / denom
+    t = max(0.0, min(1.0, t))
+    closest_x = ax + t * abx
+    closest_y = ay + t * aby
+    return math.hypot(px - closest_x, py - closest_y)
+
+
+def path_blocked_by_known_obstacle(start: Pose2D, target_x: float, target_y: float, world_map: Optional[WorldMap]) -> bool:
+    if world_map is None:
+        return False
+    for obstacle in world_map.obstacles:
+        if point_to_segment_distance(obstacle.x, obstacle.y, start.x, start.y, target_x, target_y) < OBSTACLE_PATH_CLEARANCE_M:
+            return True
+    return False
+
+
+def plan_navigation_points(start: Pose2D, target_x: float, target_y: float, world_map: Optional[WorldMap]) -> List[Tuple[float, float]]:
+    if world_map is None or not world_map.obstacles:
+        return [(target_x, target_y)]
+    if not path_blocked_by_known_obstacle(start, target_x, target_y, world_map):
+        return [(target_x, target_y)]
+
+    sx, sy = start.x, start.y
+    dx = target_x - sx
+    dy = target_y - sy
+    distance = math.hypot(dx, dy)
+    if distance <= 1e-6:
+        return [(target_x, target_y)]
+
+    perp_x = -dy / distance
+    perp_y = dx / distance
+    blocking = sorted(
+        world_map.obstacles,
+        key=lambda obs: point_to_segment_distance(obs.x, obs.y, sx, sy, target_x, target_y),
+    )
+    obstacle = blocking[0]
+    detour_radius = OBSTACLE_PATH_CLEARANCE_M + OBSTACLE_DETOUR_MARGIN_M
+    candidates: List[Tuple[float, float]] = []
+    for sign in (1.0, -1.0):
+        detour_x = obstacle.x + sign * perp_x * detour_radius
+        detour_y = obstacle.y + sign * perp_y * detour_radius
+        detour_x, detour_y = clamp_to_workspace(detour_x, detour_y)
+        candidates.append((detour_x, detour_y))
+
+    best_path: Optional[List[Tuple[float, float]]] = None
+    best_cost = float("inf")
+    for detour_x, detour_y in candidates:
+        detour_pose = Pose2D(x=detour_x, y=detour_y, yaw=start.yaw)
+        if path_blocked_by_known_obstacle(start, detour_x, detour_y, world_map):
+            continue
+        if path_blocked_by_known_obstacle(detour_pose, target_x, target_y, world_map):
+            continue
+        cost = (
+            math.hypot(detour_x - sx, detour_y - sy)
+            + math.hypot(target_x - detour_x, target_y - detour_y)
+        )
+        if cost < best_cost:
+            best_cost = cost
+            best_path = [(detour_x, detour_y), (target_x, target_y)]
+
+    if best_path is not None:
+        print(f"[Nav] planned obstacle detour via ({best_path[0][0]:.2f}, {best_path[0][1]:.2f})")
+        return best_path
+    return [(target_x, target_y)]
 
 
 def estimate_bbox_distance_m(detection: Detection, cls: Optional[int] = None) -> Optional[float]:
@@ -337,16 +473,27 @@ def turn_to_yaw(ep_chassis, pose: Pose2D, target_yaw_rad: float) -> None:
 
 
 def navigate_to_point(ep_chassis, pose: Pose2D, target_x: float, target_y: float, stop_dist_m: float = 0.0) -> None:
-    # Simple point-to-point navigation: face the target, then translate along
-    # the robot forward axis.
-    dx = target_x - pose.x
-    dy = target_y - pose.y
-    distance_m = math.hypot(dx, dy)
-    if distance_m <= stop_dist_m:
-        return
-    heading_rad = math.atan2(dy, dx)
-    turn_to_yaw(ep_chassis, pose, heading_rad)
-    move_robot(ep_chassis, pose, x_m=max(0.0, distance_m - stop_dist_m))
+    navigate_to_point_with_map(ep_chassis, pose, None, target_x, target_y, stop_dist_m=stop_dist_m)
+
+
+def navigate_to_point_with_map(
+    ep_chassis,
+    pose: Pose2D,
+    world_map: Optional[WorldMap],
+    target_x: float,
+    target_y: float,
+    stop_dist_m: float = 0.0,
+) -> None:
+    for waypoint_x, waypoint_y in plan_navigation_points(pose, target_x, target_y, world_map):
+        dx = waypoint_x - pose.x
+        dy = waypoint_y - pose.y
+        distance_m = math.hypot(dx, dy)
+        waypoint_stop = stop_dist_m if (waypoint_x, waypoint_y) == (target_x, target_y) else 0.0
+        if distance_m <= waypoint_stop:
+            continue
+        heading_rad = math.atan2(dy, dx)
+        turn_to_yaw(ep_chassis, pose, heading_rad)
+        move_robot(ep_chassis, pose, x_m=max(0.0, distance_m - waypoint_stop))
 
 
 def detect_tags_and_objects(frame: np.ndarray, yolo_model: YOLO, tag_detector: AprilTagDetector) -> Tuple[list, List[Detection]]:
@@ -370,6 +517,164 @@ def find_best_tag(tags: Sequence, valid_ids: Iterable[int]):
 
 def center_error_px(cx_px: float) -> float:
     return float(cx_px) - float(K_CAM[0, 2])
+
+
+def compute_tag_reference(tag, goal_kind: str, pose: Pose2D) -> TagReference:
+    T_ct = transform_from_rt(np.array(tag.pose_R, dtype=float), np.array(tag.pose_t, dtype=float))
+    T_wr = transform_from_rt(rotz(pose.yaw), np.array([pose.x, pose.y, 0.0], dtype=float))
+    T_wt = T_wr @ T_ROBOT_FROM_CAMERA @ T_ct
+    return TagReference(
+        tag_id=int(tag.tag_id),
+        goal_kind=goal_kind,
+        world_x=float(T_wt[0, 3]),
+        world_y=float(T_wt[1, 3]),
+        world_yaw=yaw_from_rotation(T_wt[:3, :3]),
+        reference_pose=copy_pose(pose),
+        reference_distance_m=AprilTagDetector.tag_distance_m(tag),
+        reference_center_x_px=float(tag.center[0]),
+    )
+
+
+def landmark_from_tag_detection(tag, kind: str, pose: Pose2D) -> Landmark:
+    T_ct = transform_from_rt(np.array(tag.pose_R, dtype=float), np.array(tag.pose_t, dtype=float))
+    T_wr = transform_from_rt(rotz(pose.yaw), np.array([pose.x, pose.y, 0.0], dtype=float))
+    T_wt = T_wr @ T_ROBOT_FROM_CAMERA @ T_ct
+    return Landmark(
+        kind=kind,
+        x=float(T_wt[0, 3]),
+        y=float(T_wt[1, 3]),
+        tag_id=int(tag.tag_id),
+    )
+
+
+def estimate_pose_from_tag_reference(tag, tag_ref: TagReference) -> Pose2D:
+    T_ct = transform_from_rt(np.array(tag.pose_R, dtype=float), np.array(tag.pose_t, dtype=float))
+    T_wt = transform_from_rt(
+        rotz(tag_ref.world_yaw),
+        np.array([tag_ref.world_x, tag_ref.world_y, 0.0], dtype=float),
+    )
+    T_wc = T_wt @ invert_transform(T_ct)
+    T_wr = T_wc @ invert_transform(T_ROBOT_FROM_CAMERA)
+    return Pose2D(
+        x=float(T_wr[0, 3]),
+        y=float(T_wr[1, 3]),
+        yaw=wrap_to_pi(yaw_from_rotation(T_wr[:3, :3])),
+    )
+
+
+def capture_intermediate_reference_if_needed(world_map: WorldMap, goal: Landmark, tag, pose: Pose2D) -> None:
+    if world_map.intermediate is not None or world_map.dropoff_tag_ref is not None:
+        return
+    if goal.kind not in ("small_goal", "large_goal"):
+        return
+    world_map.intermediate = Landmark(kind="intermediate", x=pose.x, y=pose.y)
+    world_map.dropoff_tag_ref = compute_tag_reference(tag, goal.kind, pose)
+    print(
+        "[Map] intermediate waypoint recorded at "
+        f"({pose.x:.2f}, {pose.y:.2f}) from {goal.kind} tag {int(tag.tag_id)}"
+    )
+
+
+def relocalize_from_dropoff_tag(
+    ep_camera,
+    ep_chassis,
+    yolo_model: YOLO,
+    tag_detector: AprilTagDetector,
+    pose: Pose2D,
+    world_map: WorldMap,
+    timeout_s: float = 6.0,
+) -> bool:
+    tag_ref = world_map.dropoff_tag_ref
+    if tag_ref is None:
+        return False
+
+    turn_to_yaw(ep_chassis, pose, tag_ref.reference_pose.yaw)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        frame = read_frame(ep_camera, timeout=0.5)
+        if frame is None:
+            continue
+        tags, _ = detect_tags_and_objects(frame, yolo_model, tag_detector)
+        tag = find_best_tag(tags, {tag_ref.tag_id})
+        if tag is None:
+            move_robot(ep_chassis, pose, z_deg=8.0)
+            continue
+
+        center_delta_px = float(tag.center[0]) - tag_ref.reference_center_x_px
+        dist_delta_m = AprilTagDetector.tag_distance_m(tag) - tag_ref.reference_distance_m
+        if abs(center_delta_px) > REFERENCE_CENTER_TOL_PX:
+            move_robot(ep_chassis, pose, z_deg=max(-8.0, min(8.0, -0.10 * center_delta_px)))
+            continue
+        if abs(dist_delta_m) > REFERENCE_DIST_TOL_M:
+            move_robot(ep_chassis, pose, x_m=max(-0.08, min(0.08, dist_delta_m)))
+            continue
+
+        refined_pose = estimate_pose_from_tag_reference(tag, tag_ref)
+        pose.x = refined_pose.x
+        pose.y = refined_pose.y
+        pose.yaw = refined_pose.yaw
+        print(f"[Localize] pose corrected from drop-off tag -> ({pose.x:.2f}, {pose.y:.2f}, {math.degrees(pose.yaw):.1f} deg)")
+        return True
+
+    print("[Localize] drop-off relocalization timed out.")
+    return False
+
+
+def go_to_intermediate_waypoint(
+    ep_camera,
+    ep_chassis,
+    yolo_model: YOLO,
+    tag_detector: AprilTagDetector,
+    pose: Pose2D,
+    world_map: WorldMap,
+    relocalize: bool = True,
+) -> None:
+    if world_map.intermediate is None:
+        return
+    distance_m = math.hypot(world_map.intermediate.x - pose.x, world_map.intermediate.y - pose.y)
+    if distance_m > INTERMEDIATE_SNAP_DIST_M:
+        navigate_to_point_with_map(
+            ep_chassis,
+            pose,
+            world_map,
+            world_map.intermediate.x,
+            world_map.intermediate.y,
+            stop_dist_m=0.0,
+        )
+    if relocalize:
+        relocalize_from_dropoff_tag(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
+
+
+def try_refine_recharge_from_tag(
+    ep_camera,
+    ep_chassis,
+    yolo_model: YOLO,
+    tag_detector: AprilTagDetector,
+    pose: Pose2D,
+    world_map: WorldMap,
+    timeout_s: float = 5.0,
+) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        frame = read_frame(ep_camera, timeout=0.5)
+        if frame is None:
+            continue
+        tags, _ = detect_tags_and_objects(frame, yolo_model, tag_detector)
+        tag = find_best_tag(tags, RECHARGE_TAG_IDS)
+        if tag is None:
+            move_robot(ep_chassis, pose, z_deg=10.0)
+            continue
+
+        recharge_landmark = landmark_from_tag_detection(tag, "recharge", pose)
+        world_map.recharge = recharge_landmark
+        print(
+            "[Recharge] refined recharge landmark from tag "
+            f"{recharge_landmark.tag_id} -> ({recharge_landmark.x:.2f}, {recharge_landmark.y:.2f})"
+        )
+        return True
+
+    print("[Recharge] recharge tag not found during refinement window; keeping coarse recharge position.")
+    return False
 
 
 def wait_for_goal_tag(ep_camera, yolo_model: YOLO, tag_detector: AprilTagDetector, valid_ids: Iterable[int], timeout_s: float = 5.0):
@@ -485,6 +790,7 @@ def scan_left_and_map_world(
                 bearing_rad = pixel_bearing_rad(float(tag.center[0]))
                 world_x, world_y = world_from_range_and_bearing(pose, distance_m, bearing_rad)
                 landmark = world_map.set_goal(opposite_goal_kind, world_x, world_y, int(tag.tag_id))
+                capture_intermediate_reference_if_needed(world_map, landmark, tag, pose)
                 print(f"[Map] opposite goal: {opposite_goal_kind} at ({world_x:.2f}, {world_y:.2f})")
                 return landmark
 
@@ -629,12 +935,14 @@ def align_to_goal_and_drop(
     yolo_model: YOLO,
     tag_detector: AprilTagDetector,
     pose: Pose2D,
+    world_map: WorldMap,
     goal: Landmark,
 ) -> None:
     # Navigate to the mapped goal first, then refine with a tag servo so the
     # final placement lines up with the actual drop-off face.
     goal_ids = SMALL_GOAL_TAG_IDS if goal.kind == "small_goal" else LARGE_GOAL_TAG_IDS
-    navigate_to_point(ep_chassis, pose, goal.x, goal.y, stop_dist_m=LANDMARK_STOP_DIST_M)
+    go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
+    navigate_to_point_with_map(ep_chassis, pose, world_map, goal.x, goal.y, stop_dist_m=LANDMARK_STOP_DIST_M)
     success = servo_to_visible_tag(
         ep_camera,
         ep_chassis,
@@ -647,6 +955,7 @@ def align_to_goal_and_drop(
     if not success:
         print("[Goal] Tag servo timed out; placing based on mapped position.")
     place_down_tower(ep_robot=ep_robot)
+    go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
 
 
 def recharge_robot(
@@ -663,7 +972,24 @@ def recharge_robot(
     if world_map.recharge is None:
         raise RuntimeError("Recharge requested before recharge landmark was mapped.")
 
-    navigate_to_point(ep_chassis, pose, world_map.recharge.x, world_map.recharge.y, stop_dist_m=LANDMARK_STOP_DIST_M)
+    go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
+    navigate_to_point_with_map(
+        ep_chassis,
+        pose,
+        world_map,
+        world_map.recharge.x,
+        world_map.recharge.y,
+        stop_dist_m=LANDMARK_STOP_DIST_M,
+    )
+    try_refine_recharge_from_tag(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
+    navigate_to_point_with_map(
+        ep_chassis,
+        pose,
+        world_map,
+        world_map.recharge.x,
+        world_map.recharge.y,
+        stop_dist_m=max(RECHARGE_SERVO_DIST_M + 0.10, 0.30),
+    )
     success = servo_to_visible_tag(
         ep_camera,
         ep_chassis,
@@ -679,6 +1005,7 @@ def recharge_robot(
     time.sleep(5.0)
     battery.recharge()
     print(f"[Recharge] Battery now {battery.level:.0f}%")
+    go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
 
 
 def execute_mapping_sequence(
@@ -721,6 +1048,9 @@ def execute_mapping_sequence(
     target_goal = world_map.right_side_goal()
     if target_goal is None:
         raise RuntimeError("No drop-off goal was mapped.")
+    if world_map.intermediate is None:
+        world_map.intermediate = Landmark(kind="intermediate", x=pose.x, y=pose.y)
+        print(f"[Map] fallback intermediate waypoint at ({pose.x:.2f}, {pose.y:.2f})")
     print(f"[Mission] Using right-side goal `{target_goal.kind}` at ({target_goal.x:.2f}, {target_goal.y:.2f})")
     return target_goal
 
@@ -746,21 +1076,31 @@ def run_delivery_loop(
     print(f"[Mission] Dock -> {target_goal.kind} loop for class {target_class}")
 
     deliveries = 0
+    go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
     while deliveries < max_deliveries:
         # Recharge before pickup if this battery level cannot support one more
         # brick of the required class.
         if not battery.can_pick(target_class):
             recharge_robot(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map, battery)
 
-        navigate_to_point(ep_chassis, pose, world_map.dock.x, world_map.dock.y, stop_dist_m=0.50)
+        go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
+        navigate_to_point_with_map(
+            ep_chassis,
+            pose,
+            world_map,
+            world_map.dock.x,
+            world_map.dock.y,
+            stop_dist_m=0.50,
+        )
         success = approach_brick_with_move(ep_robot, ep_camera, ep_chassis, yolo_model, pose, target_class)
         if not success:
             raise RuntimeError("Could not approach the requested brick class at the loading dock.")
 
         battery.consume(target_class)
         print(f"[Battery] After pickup: {battery.level:.0f}%")
+        go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
 
-        align_to_goal_and_drop(ep_robot, ep_camera, ep_chassis, yolo_model, tag_detector, pose, target_goal)
+        align_to_goal_and_drop(ep_robot, ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map, target_goal)
         deliveries += 1
         print(f"[Mission] Delivery {deliveries}/{max_deliveries} complete")
 
@@ -819,6 +1159,8 @@ def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> N
                 alpha=0.8,
             )
         )
+    if world_map.intermediate:
+        ax.plot(world_map.intermediate.x, world_map.intermediate.y, "co", markersize=10)
 
     if robot_pose is not None:
         ax.plot(robot_pose.x, robot_pose.y, "ms", markersize=10)
