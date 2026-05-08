@@ -90,6 +90,7 @@ MAX_TAG_SEARCH_STEPS = 24
 REFERENCE_CENTER_TOL_PX = 25.0
 REFERENCE_DIST_TOL_M = 0.18
 INTERMEDIATE_SNAP_DIST_M = 0.12
+DEBUG_WINDOW_NAME = "Project 3 Feed"
 
 # Calibrated distance model copied from live_feed.py.
 OBJECT_HEIGHTS_M = {
@@ -297,7 +298,7 @@ def rotz(yaw_rad: float) -> np.ndarray:
     c = math.cos(yaw_rad)
     s = math.sin(yaw_rad)
     return np.array(
-        [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]],
+        [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]],
         dtype=float,
     )
 
@@ -319,7 +320,7 @@ def invert_transform(T: np.ndarray) -> np.ndarray:
 
 
 def yaw_from_rotation(R: np.ndarray) -> float:
-    return math.atan2(float(R[1, 0]), float(R[0, 0]))
+    return math.atan2(float(R[0, 1]), float(R[0, 0]))
 
 
 def read_frame(ep_camera, timeout: float = 1.0) -> Optional[np.ndarray]:
@@ -490,28 +491,28 @@ def move_robot(
 
     # RoboMaster translations are commanded in the robot body frame, so we
     # rotate that motion into the global workspace frame before updating pose.
-    world_dx = x_m * math.cos(pose.yaw) - y_m * math.sin(pose.yaw)
-    world_dy = x_m * math.sin(pose.yaw) + y_m * math.cos(pose.yaw)
+    world_dx = x_m * math.cos(pose.yaw) + y_m * math.sin(pose.yaw)
+    world_dy = x_m * math.sin(pose.yaw) - y_m * math.cos(pose.yaw)
     pose.x += world_dx
     pose.y += world_dy
-    pose.yaw = wrap_to_pi(pose.yaw + math.radians(z_deg))
+    pose.yaw = wrap_to_pi(pose.yaw - math.radians(z_deg))
     print(f"[Pose] x={pose.x:.2f} y={pose.y:.2f} yaw={math.degrees(pose.yaw):.1f} deg")
 
 
 def integrate_drive_speed(pose: Pose2D, vx: float, vy: float, wz_deg_s: float, dt_s: float) -> None:
     # Only used during tag servo, where motion is applied as short velocity
     # bursts instead of a single `move(...)` command.
-    world_dx = (vx * math.cos(pose.yaw) - vy * math.sin(pose.yaw)) * dt_s
-    world_dy = (vx * math.sin(pose.yaw) + vy * math.cos(pose.yaw)) * dt_s
+    world_dx = (vx * math.cos(pose.yaw) + vy * math.sin(pose.yaw)) * dt_s
+    world_dy = (vx * math.sin(pose.yaw) - vy * math.cos(pose.yaw)) * dt_s
     pose.x += world_dx
     pose.y += world_dy
-    pose.yaw = wrap_to_pi(pose.yaw + math.radians(wz_deg_s * dt_s))
+    pose.yaw = wrap_to_pi(pose.yaw - math.radians(wz_deg_s * dt_s))
 
 
 def turn_to_yaw(ep_chassis, pose: Pose2D, target_yaw_rad: float) -> None:
     # Turn with the high-level move command so the yaw update stays consistent
     # with the global pose tracker.
-    delta_deg = math.degrees(wrap_to_pi(target_yaw_rad - pose.yaw))
+    delta_deg = math.degrees(wrap_to_pi(pose.yaw - target_yaw_rad))
     if abs(delta_deg) < 1.0:
         return
     move_robot(ep_chassis, pose, z_deg=delta_deg)
@@ -549,7 +550,51 @@ def detect_tags_and_objects(frame: np.ndarray, yolo_model: YOLO, tag_detector: A
     except Exception:
         tags = []
     detections = get_detections(yolo_model, frame, conf_thresh=0.40)
+    show_debug_overlay(frame, tags, detections)
     return tags, detections
+
+
+def show_debug_overlay(frame: np.ndarray, tags: Sequence, detections: Sequence[Detection]) -> None:
+    overlay = frame.copy()
+
+    for det in detections:
+        x1 = int(det.cx - 0.5 * det.w)
+        y1 = int(det.cy - 0.5 * det.h)
+        x2 = int(det.cx + 0.5 * det.w)
+        y2 = int(det.cy + 0.5 * det.h)
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        distance_m = estimate_bbox_distance_m(det)
+        label = f"cls:{det.cls} conf:{det.conf:.2f}"
+        if distance_m is not None:
+            label += f" d:{distance_m:.2f}m"
+        cv2.putText(
+            overlay,
+            label,
+            (x1, max(16, y1 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 255, 0),
+            1,
+        )
+
+    for tag in tags:
+        corners = np.array(tag.corners, dtype=np.int32).reshape((-1, 2))
+        cv2.polylines(overlay, [corners], isClosed=True, color=(0, 0, 255), thickness=2)
+        cx = int(tag.center[0])
+        cy = int(tag.center[1])
+        distance_m = AprilTagDetector.tag_distance_m(tag)
+        cv2.putText(
+            overlay,
+            f"id:{int(tag.tag_id)} d:{distance_m:.2f}m",
+            (cx + 6, cy + 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 255),
+            1,
+        )
+
+    cv2.imshow(DEBUG_WINDOW_NAME, overlay)
+    cv2.waitKey(1)
 
 
 def find_best_tag(tags: Sequence, valid_ids: Iterable[int]):
@@ -862,7 +907,7 @@ def scan_left_and_map_world(
                 print(f"[Map] opposite goal: {opposite_goal_kind} at ({landmark.x:.2f}, {landmark.y:.2f})")
                 return landmark
 
-        move_robot(ep_chassis, pose, y_m=LEFT_SCAN_STEP_M)
+        move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
         total_left_m += LEFT_SCAN_STEP_M
 
     raise RuntimeError("Could not map the opposite goal while translating left.")
@@ -1248,7 +1293,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--robot-ip", default=ROBOT_IP or DEFAULT_ROBOT_IP)
     parser.add_argument("--sn", default=ROBOT_SN or DEFAULT_ROBOT_SN)
     parser.add_argument("--conn-type", default="sta", choices=["sta", "ap"])
-    parser.add_argument("--resolution", default="720p", choices=["360p", "720p"])
+    parser.add_argument("--resolution", default="360p", choices=["360p", "720p"])
     parser.add_argument("--map-only", action="store_true")
     parser.add_argument("--show-map", action="store_true")
     parser.add_argument("--max-deliveries", type=int, default=3)
@@ -1281,7 +1326,7 @@ def main() -> None:
     ep_camera = ep_robot.camera
     ep_chassis = ep_robot.chassis
     resolution = rm_camera.STREAM_720P if args.resolution == "720p" else rm_camera.STREAM_360P
-    ep_camera.start_video_stream(display=True, resolution=resolution)
+    ep_camera.start_video_stream(display=False, resolution=resolution)
 
     try:
         ep_robot.robotic_arm.moveto(x=DEFAULT_ARM_X, y=DEFAULT_ARM_Y).wait_for_completed()

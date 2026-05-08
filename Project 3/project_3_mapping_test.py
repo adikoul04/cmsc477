@@ -129,7 +129,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--robot-ip", default=ROBOT_IP or DEFAULT_ROBOT_IP)
     parser.add_argument("--sn", default=ROBOT_SN or DEFAULT_ROBOT_SN)
     parser.add_argument("--conn-type", default="sta", choices=["sta", "ap"])
-    parser.add_argument("--resolution", default="720p", choices=["360p", "720p"])
+    parser.add_argument("--resolution", default="360p", choices=["360p", "720p"])
     parser.add_argument("--show-map", action="store_true")
     return parser.parse_args()
 
@@ -158,7 +158,7 @@ def main() -> None:
     ep_camera = ep_robot.camera
     ep_chassis = ep_robot.chassis
     resolution = rm_camera.STREAM_720P if args.resolution == "720p" else rm_camera.STREAM_360P
-    ep_camera.start_video_stream(display=True, resolution=resolution)
+    ep_camera.start_video_stream(display=False, resolution=resolution)
 
     try:
         ep_robot.robotic_arm.moveto(x=DEFAULT_ARM_X, y=DEFAULT_ARM_Y).wait_for_completed()
