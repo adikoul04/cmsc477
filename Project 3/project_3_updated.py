@@ -160,14 +160,24 @@ class WorldMap:
             self.large_goal = landmark
         return landmark
 
-    def add_or_update_obstacle(self, x: float, y: float) -> Landmark:
-        # Obstacles are merged when repeated centered observations land nearby.
+    def add_or_update_obstacle(self, x: float, y: float, tag_id: Optional[int] = None) -> Landmark:
+        # Obstacle tags provide persistent identity, so prefer matching by tag
+        # before falling back to geometric merge-by-distance.
+        if tag_id is not None:
+            for obstacle in self.obstacles:
+                if obstacle.tag_id == tag_id:
+                    obstacle.x = x
+                    obstacle.y = y
+                    return obstacle
+        # Obstacles are otherwise merged when repeated observations land nearby.
         for obstacle in self.obstacles:
             if math.hypot(obstacle.x - x, obstacle.y - y) <= OBSTACLE_MERGE_RADIUS_M:
                 obstacle.x = 0.5 * (obstacle.x + x)
                 obstacle.y = 0.5 * (obstacle.y + y)
+                if tag_id is not None:
+                    obstacle.tag_id = tag_id
                 return obstacle
-        obstacle = Landmark(kind="obstacle", x=x, y=y)
+        obstacle = Landmark(kind="obstacle", x=x, y=y, tag_id=tag_id)
         self.obstacles.append(obstacle)
         return obstacle
 
@@ -269,6 +279,14 @@ def goal_kind_from_tag(tag_id: int) -> Optional[str]:
     if tag_id in LARGE_GOAL_TAG_IDS:
         return "large_goal"
     return None
+
+
+def is_obstacle_tag(tag_id: int) -> bool:
+    return (
+        tag_id not in SMALL_GOAL_TAG_IDS
+        and tag_id not in LARGE_GOAL_TAG_IDS
+        and tag_id not in RECHARGE_TAG_IDS
+    )
 
 
 def brick_class_for_goal(goal: Landmark) -> int:
@@ -429,6 +447,33 @@ def detection_world_position(detection: Detection, pose: Pose2D) -> Optional[Tup
     return world_from_range_and_bearing(pose, distance_m, bearing_rad)
 
 
+def debug_log_tag_mapping(tag, pose: Pose2D, label: str) -> None:
+    distance_m = AprilTagDetector.tag_distance_m(tag)
+    bearing_rad = pixel_bearing_rad(float(tag.center[0]))
+    world_x, world_y = world_from_range_and_bearing(pose, distance_m, bearing_rad)
+    print(
+        f"[Debug][{label}] tag={int(tag.tag_id)} "
+        f"pose=({pose.x:.2f}, {pose.y:.2f}, {math.degrees(pose.yaw):.1f} deg) "
+        f"dist={distance_m:.2f}m bearing={math.degrees(bearing_rad):+.1f} deg "
+        f"-> world=({world_x:.2f}, {world_y:.2f})"
+    )
+
+
+def debug_log_box_mapping(detection: Detection, pose: Pose2D, label: str) -> None:
+    distance_m = estimate_bbox_distance_m(detection)
+    if distance_m is None:
+        return
+    bearing_rad = pixel_bearing_rad(detection.cx)
+    world_x, world_y = world_from_range_and_bearing(pose, distance_m, bearing_rad)
+    print(
+        f"[Debug][{label}] cls={detection.cls} "
+        f"pose=({pose.x:.2f}, {pose.y:.2f}, {math.degrees(pose.yaw):.1f} deg) "
+        f"dist={distance_m:.2f}m bearing={math.degrees(bearing_rad):+.1f} deg "
+        f"bbox_h={float(detection.h):.1f}px center_x={float(detection.cx):.1f}px "
+        f"-> world=({world_x:.2f}, {world_y:.2f})"
+    )
+
+
 def move_robot(
     ep_chassis,
     pose: Pose2D,
@@ -535,14 +580,19 @@ def compute_tag_reference(tag, goal_kind: str, pose: Pose2D) -> TagReference:
     )
 
 
+def tag_world_position_from_pose(tag, pose: Pose2D) -> Tuple[float, float]:
+    """Map a visible tag using current robot pose plus tag distance/bearing."""
+    distance_m = AprilTagDetector.tag_distance_m(tag)
+    bearing_rad = pixel_bearing_rad(float(tag.center[0]))
+    return world_from_range_and_bearing(pose, distance_m, bearing_rad)
+
+
 def landmark_from_tag_detection(tag, kind: str, pose: Pose2D) -> Landmark:
-    T_ct = transform_from_rt(np.array(tag.pose_R, dtype=float), np.array(tag.pose_t, dtype=float))
-    T_wr = transform_from_rt(rotz(pose.yaw), np.array([pose.x, pose.y, 0.0], dtype=float))
-    T_wt = T_wr @ T_ROBOT_FROM_CAMERA @ T_ct
+    world_x, world_y = tag_world_position_from_pose(tag, pose)
     return Landmark(
         kind=kind,
-        x=float(T_wt[0, 3]),
-        y=float(T_wt[1, 3]),
+        x=world_x,
+        y=world_y,
         tag_id=int(tag.tag_id),
     )
 
@@ -665,6 +715,7 @@ def try_refine_recharge_from_tag(
             move_robot(ep_chassis, pose, z_deg=10.0)
             continue
 
+        debug_log_tag_mapping(tag, pose, "recharge-tag-refine")
         recharge_landmark = landmark_from_tag_detection(tag, "recharge", pose)
         world_map.recharge = recharge_landmark
         print(
@@ -699,8 +750,7 @@ def map_goal_from_view(
     valid_ids: Iterable[int],
     label: str,
 ) -> Landmark:
-    # The initial goal and opposite goal are mapped directly from the observed
-    # AprilTag range and horizontal bearing.
+    # Goals are mapped from the current robot pose plus tag distance/bearing.
     frame, tag = wait_for_goal_tag(ep_camera, yolo_model, tag_detector, valid_ids, timeout_s=6.0)
     if tag is None:
         raise RuntimeError(f"Could not detect {label} goal tag.")
@@ -708,11 +758,10 @@ def map_goal_from_view(
     goal_kind = goal_kind_from_tag(tag_id)
     if goal_kind is None:
         raise RuntimeError(f"Detected tag {tag_id}, but it is not configured as a goal tag.")
-    distance_m = tag_detector.tag_distance_m(tag)
-    bearing_rad = pixel_bearing_rad(float(tag.center[0]))
-    world_x, world_y = world_from_range_and_bearing(pose, distance_m, bearing_rad)
-    landmark = world_map.set_goal(goal_kind, world_x, world_y, tag_id)
-    print(f"[Map] {label}: {goal_kind} at ({world_x:.2f}, {world_y:.2f}) tag={tag_id}")
+    debug_log_tag_mapping(tag, pose, label)
+    landmark = landmark_from_tag_detection(tag, goal_kind, pose)
+    landmark = world_map.set_goal(goal_kind, landmark.x, landmark.y, tag_id)
+    print(f"[Map] {label}: {goal_kind} at ({landmark.x:.2f}, {landmark.y:.2f}) tag={tag_id}")
     return landmark
 
 
@@ -738,6 +787,7 @@ def map_recharge_from_box(
         selected = min(boxes, key=lambda det: abs(center_error_px(det.cx)))
         if abs(center_error_px(selected.cx)) > CENTER_TOL_PX:
             continue
+        debug_log_box_mapping(selected, pose, "recharge-box")
         world_pos = detection_world_position(selected, pose)
         if world_pos is None:
             continue
@@ -757,7 +807,7 @@ def scan_left_and_map_world(
     initial_goal_kind: str,
 ) -> Landmark:
     # After moving forward 2 ft, the robot translates left and opportunistically
-    # maps centered obstacles until it eventually reaches the opposite goal zone.
+    # maps known obstacle tags plus the opposite goal zone.
     opposite_goal_kind = "large_goal" if initial_goal_kind == "small_goal" else "small_goal"
     opposite_ids = LARGE_GOAL_TAG_IDS if opposite_goal_kind == "large_goal" else SMALL_GOAL_TAG_IDS
 
@@ -768,30 +818,48 @@ def scan_left_and_map_world(
             tags, detections = detect_tags_and_objects(frame, yolo_model, tag_detector)
 
             if len(world_map.obstacles) < 2:
-                # Only commit obstacle positions when the box is horizontally
-                # centered, which matches the user's mapping constraint.
-                boxes = [det for det in detections if det.cls == CLASS_BOX]
-                centered_boxes = [det for det in boxes if abs(center_error_px(det.cx)) <= CENTER_TOL_PX]
-                for box in centered_boxes:
-                    world_pos = detection_world_position(box, pose)
-                    if world_pos is None:
+                mapped_from_tags = False
+                for tag in tags:
+                    tag_id = int(tag.tag_id)
+                    if not is_obstacle_tag(tag_id):
                         continue
-                    if world_map.recharge is not None:
-                        if math.hypot(world_pos[0] - world_map.recharge.x, world_pos[1] - world_map.recharge.y) < 0.40:
-                            continue
-                    obstacle = world_map.add_or_update_obstacle(world_pos[0], world_pos[1])
-                    print(f"[Map] obstacle at ({obstacle.x:.2f}, {obstacle.y:.2f})")
+                    debug_log_tag_mapping(tag, pose, "obstacle-tag")
+                    obstacle_landmark = landmark_from_tag_detection(tag, "obstacle", pose)
+                    obstacle = world_map.add_or_update_obstacle(
+                        obstacle_landmark.x,
+                        obstacle_landmark.y,
+                        tag_id=tag_id,
+                    )
+                    print(f"[Map] obstacle tag {tag_id} at ({obstacle.x:.2f}, {obstacle.y:.2f})")
+                    mapped_from_tags = True
                     if len(world_map.obstacles) >= 2:
                         break
 
+                if not mapped_from_tags:
+                    # Fallback: if no obstacle tag is visible in the current
+                    # frame, keep the old centered-box mapping behavior.
+                    boxes = [det for det in detections if det.cls == CLASS_BOX]
+                    centered_boxes = [det for det in boxes if abs(center_error_px(det.cx)) <= CENTER_TOL_PX]
+                    for box in centered_boxes:
+                        debug_log_box_mapping(box, pose, "obstacle-box-fallback")
+                        world_pos = detection_world_position(box, pose)
+                        if world_pos is None:
+                            continue
+                        if world_map.recharge is not None:
+                            if math.hypot(world_pos[0] - world_map.recharge.x, world_pos[1] - world_map.recharge.y) < 0.40:
+                                continue
+                        obstacle = world_map.add_or_update_obstacle(world_pos[0], world_pos[1])
+                        print(f"[Map] obstacle fallback at ({obstacle.x:.2f}, {obstacle.y:.2f})")
+                        if len(world_map.obstacles) >= 2:
+                            break
+
             tag = find_best_tag(tags, opposite_ids)
             if tag is not None and abs(center_error_px(float(tag.center[0]))) <= CENTER_TOL_PX:
-                distance_m = tag_detector.tag_distance_m(tag)
-                bearing_rad = pixel_bearing_rad(float(tag.center[0]))
-                world_x, world_y = world_from_range_and_bearing(pose, distance_m, bearing_rad)
-                landmark = world_map.set_goal(opposite_goal_kind, world_x, world_y, int(tag.tag_id))
+                debug_log_tag_mapping(tag, pose, "opposite-goal")
+                landmark = landmark_from_tag_detection(tag, opposite_goal_kind, pose)
+                landmark = world_map.set_goal(opposite_goal_kind, landmark.x, landmark.y, int(tag.tag_id))
                 capture_intermediate_reference_if_needed(world_map, landmark, tag, pose)
-                print(f"[Map] opposite goal: {opposite_goal_kind} at ({world_x:.2f}, {world_y:.2f})")
+                print(f"[Map] opposite goal: {opposite_goal_kind} at ({landmark.x:.2f}, {landmark.y:.2f})")
                 return landmark
 
         move_robot(ep_chassis, pose, y_m=LEFT_SCAN_STEP_M)
@@ -1213,7 +1281,7 @@ def main() -> None:
     ep_camera = ep_robot.camera
     ep_chassis = ep_robot.chassis
     resolution = rm_camera.STREAM_720P if args.resolution == "720p" else rm_camera.STREAM_360P
-    ep_camera.start_video_stream(display=False, resolution=resolution)
+    ep_camera.start_video_stream(display=True, resolution=resolution)
 
     try:
         ep_robot.robotic_arm.moveto(x=DEFAULT_ARM_X, y=DEFAULT_ARM_Y).wait_for_completed()

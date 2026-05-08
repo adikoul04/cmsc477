@@ -84,6 +84,17 @@ def estimate_distance_m(box, camera_matrix) -> float | None:
     return max(0.0, raw_distance_m)
 
 
+def estimate_tag_distance_m(detection) -> float:
+    """Return camera-to-tag 3D distance from the AprilTag pose estimate."""
+    return float(np.linalg.norm(np.array(detection.pose_t, dtype=float).reshape(3)))
+
+
+def estimate_tag_forward_distance_m(detection) -> float:
+    """Return forward camera-axis distance to the tag from the pose estimate."""
+    pose_t = np.array(detection.pose_t, dtype=float).reshape(3)
+    return float(pose_t[2])
+
+
 def draw_yolo_boxes(frame, boxes, camera_matrix):
     """boxes: list of (x1,y1,x2,y2,cls,conf)"""
     for x1, y1, x2, y2, cls, conf in boxes:
@@ -105,7 +116,17 @@ def draw_apriltags(frame, detections):
         cv2.line(frame, tuple(corners[1]), tuple(corners[3]), (0, 0, 255), 1)
         # id near center
         cx = int(det.center[0]); cy = int(det.center[1])
-        cv2.putText(frame, f"id:{int(det.tag_id)}", (cx + 6, cy + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+        distance_m = estimate_tag_distance_m(det)
+        forward_m = estimate_tag_forward_distance_m(det)
+        cv2.putText(
+            frame,
+            f"id:{int(det.tag_id)} tag:{distance_m:.2f}m z:{forward_m:.2f}m",
+            (cx + 6, cy + 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 0, 255),
+            1,
+        )
 
 
 def extract_yolo_boxes(result) -> list:
