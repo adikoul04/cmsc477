@@ -127,8 +127,8 @@ CAM_R_ROBOT_FROM_CAMERA_BASE = np.array(
 # Mount attitude relative to the nominal forward-facing camera mount.
 CAM_R_MOUNT = (
     _rotz(np.deg2rad(CAM_YAW_DEG))
-    @ _roty(np.deg2rad(CAM_PITCH_DEG))
-    @ _rotx(np.deg2rad(CAM_ROLL_DEG))
+    @ _rotx(np.deg2rad(CAM_PITCH_DEG))
+    @ _roty(np.deg2rad(CAM_ROLL_DEG))
 )
 
 CAM_R_ROBOT_FROM_CAMERA = CAM_R_ROBOT_FROM_CAMERA_BASE @ CAM_R_MOUNT
