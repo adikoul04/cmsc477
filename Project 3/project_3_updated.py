@@ -257,7 +257,7 @@ class WorldMap:
     def summary(self) -> str:
         def fmt(lm: Optional[Landmark]) -> str:
             return "NOT FOUND" if lm is None else f"({lm.x:.2f}, {lm.y:.2f})"
-        return "\n".join([
+        lines = [
             "=== WorldMap ===",
             f"  recharge:   {fmt(self.recharge)}",
             f"  small_goal: {fmt(self.small_goal)}",
@@ -265,7 +265,10 @@ class WorldMap:
             f"  dock:       {fmt(self.dock)}",
             f"  intermediate: {fmt(self.intermediate)}",
             f"  obstacles:  {len(self.obstacles)}",
-        ])
+        ]
+        for idx, obstacle in enumerate(self.obstacles, start=1):
+            lines.append(f"    obstacle_{idx}: ({obstacle.x:.2f}, {obstacle.y:.2f})")
+        return "\n".join(lines)
 
 
 class BatteryManager:
