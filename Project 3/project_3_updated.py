@@ -109,6 +109,13 @@ LEFT_SCAN_STEP_M = 0.18
 OBSTACLE_MERGE_RADIUS_M = 0.30
 OBSTACLE_PATH_CLEARANCE_M = 0.38
 OBSTACLE_DETOUR_MARGIN_M = 0.28
+OBSTACLE_FALLBACK_RADIUS_M = 0.70
+OBSTACLE_FALLBACK_POSITIONS: Tuple[Tuple[float, float], ...] = (
+    (1.2, 1.7),
+    (1.9, 1.8),
+)
+DOCK_FALLBACK_RADIUS_M = 0.70
+DOCK_FALLBACK_POSITION: Tuple[float, float] = (2.46, 0.48)
 
 # Navigation stop distances.
 LANDMARK_STOP_DIST_M = 0.55
@@ -156,6 +163,9 @@ OBJECT_HEIGHTS_M = {
     CLASS_SMALL_BRICK: 0.10,
     CLASS_LARGE_BRICK: 0.19,
 }
+
+
+ACTIVE_WORLD_MAP: Optional["WorldMap"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +216,8 @@ class WorldMap:
     intermediate: Optional[Landmark] = None
     dropoff_tag_ref: Optional[TagReference] = None
     obstacles: List[Landmark] = field(default_factory=list)
+    fallback_notes: List[str] = field(default_factory=list)
+    path_points: List[Tuple[float, float]] = field(default_factory=list)
 
     def goal_for_kind(self, kind: str) -> Optional[Landmark]:
         if kind == "small_goal":
@@ -253,6 +265,30 @@ class WorldMap:
         count += 1 if self.large_goal is not None else 0
         return count
 
+    def record_fallback(
+        self,
+        label: str,
+        detected_x: Optional[float],
+        detected_y: Optional[float],
+        final_x: float,
+        final_y: float,
+        reason: str,
+    ) -> None:
+        if detected_x is None or detected_y is None:
+            detected = "not detected"
+        else:
+            detected = f"detected=({detected_x:.2f}, {detected_y:.2f})"
+        final = f"used=({final_x:.2f}, {final_y:.2f})"
+        self.fallback_notes.append(f"{label}: {detected} -> {final} because {reason}")
+
+    def record_path_point(self, x: float, y: float) -> None:
+        point = (float(x), float(y))
+        if self.path_points:
+            last_x, last_y = self.path_points[-1]
+            if math.hypot(point[0] - last_x, point[1] - last_y) < 1e-6:
+                return
+        self.path_points.append(point)
+
     def summary(self) -> str:
         def fmt(lm: Optional[Landmark]) -> str:
             return "NOT FOUND" if lm is None else f"({lm.x:.2f}, {lm.y:.2f})"
@@ -267,6 +303,9 @@ class WorldMap:
         ]
         for idx, obstacle in enumerate(self.obstacles, start=1):
             lines.append(f"    obstacle_{idx}: ({obstacle.x:.2f}, {obstacle.y:.2f})")
+        if self.fallback_notes:
+            lines.append("  fallback notes:")
+            lines.extend([f"    {note}" for note in self.fallback_notes])
         return "\n".join(lines)
 
 
@@ -417,6 +456,41 @@ def clamp_to_workspace(x: float, y: float) -> Tuple[float, float]:
         min(max(0.0, x), WORKSPACE_W_M),
         min(max(0.0, y), WORKSPACE_H_M),
     )
+
+
+def record_active_path_point(pose: Pose2D) -> None:
+    if ACTIVE_WORLD_MAP is not None:
+        ACTIVE_WORLD_MAP.record_path_point(pose.x, pose.y)
+
+
+def point_in_workspace(x: float, y: float) -> bool:
+    return 0.0 <= x <= WORKSPACE_W_M and 0.0 <= y <= WORKSPACE_H_M
+
+
+def obstacle_fallback_for_index(index: int) -> Tuple[float, float]:
+    if not OBSTACLE_FALLBACK_POSITIONS:
+        raise RuntimeError("No obstacle fallback positions configured.")
+    if index < len(OBSTACLE_FALLBACK_POSITIONS):
+        return OBSTACLE_FALLBACK_POSITIONS[index]
+    return OBSTACLE_FALLBACK_POSITIONS[-1]
+
+
+def validate_or_fallback_obstacle(x: float, y: float, index: int) -> Tuple[float, float, Optional[str]]:
+    fallback_x, fallback_y = obstacle_fallback_for_index(index)
+    if not point_in_workspace(x, y):
+        return fallback_x, fallback_y, "outside workspace"
+    if math.hypot(x - fallback_x, y - fallback_y) > OBSTACLE_FALLBACK_RADIUS_M:
+        return fallback_x, fallback_y, f"outside {OBSTACLE_FALLBACK_RADIUS_M:.2f} m fallback radius"
+    return x, y, None
+
+
+def validate_or_fallback_dock(x: float, y: float) -> Tuple[float, float, Optional[str]]:
+    fallback_x, fallback_y = DOCK_FALLBACK_POSITION
+    if not point_in_workspace(x, y):
+        return fallback_x, fallback_y, "outside workspace"
+    if math.hypot(x - fallback_x, y - fallback_y) > DOCK_FALLBACK_RADIUS_M:
+        return fallback_x, fallback_y, f"outside {DOCK_FALLBACK_RADIUS_M:.2f} m fallback radius"
+    return x, y, None
 
 
 # ---------------------------------------------------------------------------
@@ -704,6 +778,7 @@ def move_robot(
     pose.x += world_dx
     pose.y += world_dy
     pose.yaw = wrap_to_pi(pose.yaw - math.radians(z_deg))
+    record_active_path_point(pose)
     print(
         f"[Pose] x={pose.x:.3f} y={pose.y:.3f} "
         f"yaw={math.degrees(pose.yaw):.1f}° "
@@ -728,6 +803,7 @@ def integrate_drive_speed(
     pose.x += world_dx
     pose.y += world_dy
     pose.yaw = wrap_to_pi(pose.yaw - math.radians(wz_deg_s * dt_s))
+    record_active_path_point(pose)
 
 
 def turn_to_yaw(ep_chassis, pose: Pose2D, target_yaw_rad: float) -> None:
@@ -1183,8 +1259,6 @@ def try_refine_recharge_from_tag(
     world_map: WorldMap,
     timeout_s: float = 5.0,
 ) -> bool:
-    if world_map.recharge is not None and world_map.recharge.tag_id is not None:
-        return True
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         frame = read_frame(ep_camera, timeout=0.5)
@@ -1198,12 +1272,14 @@ def try_refine_recharge_from_tag(
             continue
 
         debug_log_tag_mapping(tag, pose, "recharge-tag-refine")
-        landmark = landmark_from_tag_detection(tag, "recharge", pose)
-        world_map.recharge = landmark
-        print(f"[Recharge] refined → ({landmark.x:.3f},{landmark.y:.3f}) tag={landmark.tag_id}")
+        print(
+            f"[Recharge] recharge tag acquired for approach at "
+            f"({float(tag.center[0]):.1f}px, {float(tag.center[1]):.1f}px); "
+            "keeping the original mapped recharge position."
+        )
         return True
 
-    print("[Recharge] recharge tag not found; keeping coarse position.")
+    print("[Recharge] recharge tag not found; keeping original mapped recharge position.")
     return False
 
 
@@ -1229,6 +1305,16 @@ def wait_for_goal_tag(
 # ---------------------------------------------------------------------------
 # Mapping functions
 # ---------------------------------------------------------------------------
+
+def is_unmapped_sweep_tag(tag_id: int, world_map: WorldMap, required_obstacles: int) -> bool:
+    goal_kind = goal_kind_from_tag(tag_id)
+    if goal_kind is not None:
+        return world_map.goal_for_kind(goal_kind) is None
+    if not is_obstacle_tag(tag_id):
+        return False
+    if len(world_map.obstacles) >= required_obstacles:
+        return False
+    return all(obstacle.tag_id != tag_id for obstacle in world_map.obstacles if obstacle.tag_id is not None)
 
 def map_goal_from_view(
     ep_camera,
@@ -1307,6 +1393,13 @@ def scan_left_and_map_world(
         frame = read_frame(ep_camera, timeout=0.5)
         if frame is not None:
             tags, detections = detect_tags_and_objects(frame, yolo_model, tag_detector)
+            tags = sorted(
+                tags,
+                key=lambda tag: (
+                    0 if is_unmapped_sweep_tag(int(tag.tag_id), world_map, required_obstacles) else 1,
+                    -float(tag.center[0]),
+                ),
+            )
 
             for tag in tags:
                 tag_id = int(tag.tag_id)
@@ -1336,7 +1429,23 @@ def scan_left_and_map_world(
                     continue
                 debug_log_tag_mapping(tag, pose, "obstacle-tag")
                 lm = landmark_from_tag_detection(tag, "obstacle", pose)
-                obs = world_map.add_or_update_obstacle(lm.x, lm.y, tag_id=tag_id)
+                obstacle_index = len(world_map.obstacles)
+                obs_x, obs_y, fallback_reason = validate_or_fallback_obstacle(lm.x, lm.y, obstacle_index)
+                obs = world_map.add_or_update_obstacle(obs_x, obs_y, tag_id=tag_id)
+                if fallback_reason is not None:
+                    world_map.record_fallback(
+                        f"obstacle_{obstacle_index + 1}",
+                        lm.x,
+                        lm.y,
+                        obs.x,
+                        obs.y,
+                        fallback_reason,
+                    )
+                    print(
+                        f"[Map] obstacle tag {tag_id} mapped to fallback "
+                        f"({obs.x:.3f},{obs.y:.3f}) because detection was {fallback_reason}"
+                    )
+                    continue
                 print(f"[Map] obstacle tag {tag_id} at ({obs.x:.3f},{obs.y:.3f})")
 
             if (
@@ -1352,6 +1461,27 @@ def scan_left_and_map_world(
         # direction when facing down (yaw=π/2).
         move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
         total_left_m += LEFT_SCAN_STEP_M
+
+    while len(world_map.obstacles) < required_obstacles:
+        obstacle_index = len(world_map.obstacles)
+        fallback_x, fallback_y = obstacle_fallback_for_index(obstacle_index)
+        obs = world_map.add_or_update_obstacle(fallback_x, fallback_y)
+        world_map.record_fallback(
+            f"obstacle_{obstacle_index + 1}",
+            None,
+            None,
+            obs.x,
+            obs.y,
+            "the obstacle was not found during the sweep",
+        )
+        print(
+            f"[Map] obstacle {obstacle_index + 1} missing after sweep; "
+            f"using fallback ({obs.x:.3f},{obs.y:.3f})"
+        )
+
+    if world_map.small_goal is not None and world_map.large_goal is not None:
+        print("[Map] left sweep complete: both goals and required obstacles mapped")
+        return
 
     raise RuntimeError("Could not map both goals and the required obstacles while translating left.")
 
@@ -1379,14 +1509,40 @@ def map_loading_dock(
                 if points:
                     dock_x = float(np.mean([p[0] for p in points]))
                     dock_y = float(np.mean([p[1] for p in points]))
-                    world_map.dock = Landmark(kind="dock", x=dock_x, y=dock_y)
-                    print(f"[Map] dock at ({dock_x:.3f},{dock_y:.3f}) from {len(points)} towers")
+                    final_x, final_y, fallback_reason = validate_or_fallback_dock(dock_x, dock_y)
+                    world_map.dock = Landmark(kind="dock", x=final_x, y=final_y)
+                    if fallback_reason is not None:
+                        world_map.record_fallback(
+                            "dock",
+                            dock_x,
+                            dock_y,
+                            final_x,
+                            final_y,
+                            fallback_reason,
+                        )
+                        print(
+                            f"[Map] dock detected at ({dock_x:.3f},{dock_y:.3f}) "
+                            f"but using fallback ({final_x:.3f},{final_y:.3f}) because detection was {fallback_reason}"
+                        )
+                    else:
+                        print(f"[Map] dock at ({dock_x:.3f},{dock_y:.3f}) from {len(points)} towers")
                     return world_map.dock
 
         # Rotate CCW (yaw decreases) to sweep: chassis z positive.
         move_robot(ep_chassis, pose, z_deg=DOCK_SEARCH_STEP_DEG)
 
-    raise RuntimeError("Could not locate the loading dock tower clump.")
+    fallback_x, fallback_y = DOCK_FALLBACK_POSITION
+    world_map.dock = Landmark(kind="dock", x=fallback_x, y=fallback_y)
+    world_map.record_fallback(
+        "dock",
+        None,
+        None,
+        fallback_x,
+        fallback_y,
+        "the loading dock was not found during the dock scan",
+    )
+    print(f"[Map] dock missing after scan; using fallback ({fallback_x:.3f},{fallback_y:.3f})")
+    return world_map.dock
 
 
 # ---------------------------------------------------------------------------
@@ -1537,6 +1693,7 @@ def recharge_robot(
     pose: Pose2D,
     world_map: WorldMap,
     battery: BatteryManager,
+    leave_after_recharge: bool = True,
 ) -> None:
     if world_map.recharge is None:
         raise RuntimeError("Recharge requested before recharge was mapped.")
@@ -1562,7 +1719,8 @@ def recharge_robot(
     time.sleep(5.0)
     battery.recharge()
     print(f"[Recharge] Battery now {battery.level:.0f}%")
-    go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
+    if leave_after_recharge:
+        go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
 
 
 # ---------------------------------------------------------------------------
@@ -1693,6 +1851,12 @@ def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> N
     for obs in world_map.obstacles:
         ax.add_patch(plt.Circle((obs.x, obs.y), 0.12, color="red", alpha=0.6))
 
+    if len(world_map.path_points) >= 2:
+        xs = [point[0] for point in world_map.path_points]
+        ys = [point[1] for point in world_map.path_points]
+        ax.plot(xs, ys, color="magenta", linewidth=1.6, alpha=0.85, label="robot path")
+        ax.scatter(xs, ys, color="magenta", s=10, alpha=0.75)
+
     if world_map.recharge:
         ax.add_patch(patches.Rectangle(
             (world_map.recharge.x - 0.10, world_map.recharge.y - 0.10),
@@ -1708,8 +1872,6 @@ def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> N
             (world_map.dock.x - 0.15, world_map.dock.y - 0.15),
             0.30, 0.30, facecolor="yellow", edgecolor="goldenrod", alpha=0.8,
         ))
-    if world_map.intermediate:
-        ax.plot(world_map.intermediate.x, world_map.intermediate.y, "co", markersize=10, label="intermediate")
 
     if robot_pose is not None:
         ax.plot(robot_pose.x, robot_pose.y, "ms", markersize=10, label="robot")
@@ -1753,6 +1915,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    global ACTIVE_WORLD_MAP
 
     print("=== Project 3 Updated Workflow ===")
     print(f"[Setup] workspace = {WORKSPACE_W_M:.3f} m × {WORKSPACE_H_M:.3f} m")
@@ -1763,6 +1926,8 @@ def main() -> None:
     tag_detector = AprilTagDetector()
     pose = Pose2D(x=START_X_M, y=START_Y_M, yaw=START_YAW_RAD)
     world_map = WorldMap()
+    ACTIVE_WORLD_MAP = world_map
+    world_map.record_path_point(pose.x, pose.y)
     battery = BatteryManager()
 
     if args.conn_type == "sta":
@@ -1781,29 +1946,26 @@ def main() -> None:
         time.sleep(1.0)
         ep_robot.gripper.pause()
 
-        target_goal = execute_mapping_sequence(
+        execute_mapping_sequence(
             ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map,
+        )
+        print("[Mission] Mapping complete. Navigating to recharge station and ending there.")
+        recharge_robot(
+            ep_camera, ep_chassis, yolo_model, tag_detector,
+            pose, world_map, battery,
+            leave_after_recharge=False,
         )
         print(world_map.summary())
 
-        # Generate and save the map immediately after the mapping sequence
-        # completes so the saved PNG reflects the mapped obstacles/loading dock.
         if args.show_map or args.map_only:
             visualize_map(world_map, pose)
-
-        if not args.map_only:
-            run_delivery_loop(
-                ep_robot, ep_camera, ep_chassis,
-                yolo_model, tag_detector,
-                pose, world_map, battery,
-                target_goal, args.max_deliveries,
-            )
 
     finally:
         try:
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
         except Exception:
             pass
+        ACTIVE_WORLD_MAP = None
         try:
             ep_camera.stop_video_stream()
         except Exception:
