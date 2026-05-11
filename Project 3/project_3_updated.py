@@ -1430,7 +1430,7 @@ def scan_left_and_map_world(
     (toward the right wall), which is the correct sweep direction to cover the
     workspace from the starting corner.
     """
-    total_left_m = 0.0
+    total_left_m = 0.20
     while total_left_m < WORKSPACE_W_M:
         frame = read_frame(ep_camera, timeout=0.5)
         if frame is not None:
@@ -1738,18 +1738,9 @@ def recharge_robot(
 ) -> None:
     if world_map.recharge is None:
         raise RuntimeError("Recharge requested before recharge was mapped.")
-    go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
-    navigate_to_point_with_map(
-        ep_chassis, pose, world_map,
-        world_map.recharge.x, world_map.recharge.y,
-        stop_dist_m=LANDMARK_STOP_DIST_M,
-    )
-    face_landmark(ep_chassis, pose, world_map.recharge)
-    try_refine_recharge_from_tag(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
-    navigate_to_point_with_map(
-        ep_chassis, pose, world_map,
-        world_map.recharge.x, world_map.recharge.y,
-        stop_dist_m=max(RECHARGE_SERVO_DIST_M + 0.10, 0.30),
+    print(
+        f"[Recharge] Turning from ({pose.x:.3f}, {pose.y:.3f}, {math.degrees(pose.yaw):.1f}°) "
+        f"to face recharge at ({world_map.recharge.x:.3f}, {world_map.recharge.y:.3f})"
     )
     face_landmark(ep_chassis, pose, world_map.recharge)
     success = servo_to_visible_tag(
@@ -1757,13 +1748,12 @@ def recharge_robot(
         RECHARGE_TAG_IDS, target_dist_m=RECHARGE_SERVO_DIST_M,
     )
     if not success:
-        print("[Recharge] Tag servo timed out; holding at mapped location.")
-    print("[Recharge] Holding to simulate recharge...")
-    time.sleep(5.0)
+        print("[Recharge] Tag servo timed out before reaching the recharge tag.")
+        return
+
+    ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
     battery.recharge()
-    print(f"[Recharge] Battery now {battery.level:.0f}%")
-    if leave_after_recharge:
-        go_to_intermediate_waypoint(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
+    print(f"[Recharge] Reached recharge tag. Battery now {battery.level:.0f}%")
 
 
 # ---------------------------------------------------------------------------
@@ -1808,12 +1798,11 @@ def execute_mapping_sequence(
     map_loading_dock(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
 
     target_goal = world_map.right_side_goal()
-    if target_goal is None:
-        raise RuntimeError("No drop-off goal was mapped.")
-    if world_map.intermediate is None or world_map.dropoff_tag_ref is None:
-        raise RuntimeError("Intermediate waypoint was not recorded from the final goal-tag observation.")
-    print(f"[Mission] right-side goal: {target_goal.kind} at ({target_goal.x:.3f},{target_goal.y:.3f})")
-    return target_goal
+    if target_goal is not None:
+        print(f"[Mission] right-side goal: {target_goal.kind} at ({target_goal.x:.3f},{target_goal.y:.3f})")
+        return target_goal
+
+    raise RuntimeError("No drop-off goal was mapped.")
 
 
 def run_delivery_loop(
