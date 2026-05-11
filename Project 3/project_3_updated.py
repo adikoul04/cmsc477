@@ -215,6 +215,9 @@ class WorldMap:
         return None
 
     def set_goal(self, kind: str, x: float, y: float, tag_id: int) -> Landmark:
+        existing = self.goal_for_kind(kind)
+        if existing is not None:
+            return existing
         landmark = Landmark(kind=kind, x=x, y=y, tag_id=tag_id)
         if kind == "small_goal":
             self.small_goal = landmark
@@ -226,13 +229,9 @@ class WorldMap:
         if tag_id is not None:
             for obstacle in self.obstacles:
                 if obstacle.tag_id == tag_id:
-                    obstacle.x = x
-                    obstacle.y = y
                     return obstacle
         for obstacle in self.obstacles:
             if math.hypot(obstacle.x - x, obstacle.y - y) <= OBSTACLE_MERGE_RADIUS_M:
-                obstacle.x = 0.5 * (obstacle.x + x)
-                obstacle.y = 0.5 * (obstacle.y + y)
                 if tag_id is not None:
                     obstacle.tag_id = tag_id
                 return obstacle
@@ -1183,6 +1182,8 @@ def try_refine_recharge_from_tag(
     world_map: WorldMap,
     timeout_s: float = 5.0,
 ) -> bool:
+    if world_map.recharge is not None and world_map.recharge.tag_id is not None:
+        return True
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         frame = read_frame(ep_camera, timeout=0.5)
@@ -1310,6 +1311,8 @@ def scan_left_and_map_world(
                 tag_id = int(tag.tag_id)
                 goal_kind = goal_kind_from_tag(tag_id)
                 if goal_kind is not None:
+                    if world_map.goal_for_kind(goal_kind) is not None:
+                        continue
                     if abs(center_error_px(float(tag.center[0]))) > CENTER_TOL_PX:
                         continue
                     debug_log_tag_mapping(tag, pose, f"{goal_kind}-sweep")
