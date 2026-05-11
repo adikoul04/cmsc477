@@ -667,28 +667,26 @@ def move_robot(
       Robot body frame: +x_b forward, +y_b right.
       At world yaw θ (CW, 0=right, π/2=down):
           x̂_b → (cos θ, sin θ) in world
-          ŷ_b → (sin θ, -cos θ) in world   [+y_b=right; right at θ=0 is
-                                               world −y, i.e. (0,−1), so
-                                               sin(0)=0, −cos(0)=−1 ✓;
-                                               at θ=π/2 right is world +x:
-                                               sin(π/2)=1, −cos(π/2)=0 ✓]
-      world_dx = x_m * cos(yaw) + y_m * sin(yaw)
-      world_dy = x_m * sin(yaw) - y_m * cos(yaw)
+          ŷ_b → (-sin θ, cos θ) in world   [+y_b=right; right at θ=0 is
+                                               world +y, i.e. (0,+1), so
+                                               -sin(0)=0, cos(0)=1 ✓;
+                                               at θ=π/2 right is world −x:
+                                               -sin(π/2)=-1, cos(π/2)=0 ✓]
+      world_dx = x_m * cos(yaw) - y_m * sin(yaw)
+      world_dy = x_m * sin(yaw) + y_m * cos(yaw)
 
     Verification:
       yaw=π/2, x_m=d (forward, i.e. downward in world):
           world_dx = d*0 + 0 = 0  ✓
-          world_dy = d*1 - 0 = d  ✓
-      yaw=π/2, y_m=r (move right in body, i.e. world +x when facing down):
-          world_dx = 0 + r*1 = r  ✓
-          world_dy = 0 - r*0 = 0  ✓
+          world_dy = d*1 + 0 = d  ✓
+      yaw=π/2, y_m=r (move right in body, i.e. world −x when facing down):
+          world_dx = 0 - r*1 = -r ✓
+          world_dy = 0 + r*0 = 0  ✓
       yaw=0, x_m=d (forward = right in world):
           world_dx = d*1 + 0 = d  ✓, world_dy = 0  ✓
       yaw=0, y_m=r (move right = downward in world at yaw=0):
-          world_dx = 0 + r*0 = 0  ✓
-          world_dy = 0 - r*1 = -r  ✗ — wait. At yaw=0 (facing right/+x),
-          the robot's right is world −y (upward in the +y-down frame). So
-          y_m=+r should give world_dy = -r.  Above gives -r*cos(0) = -r  ✓.
+          world_dx = 0 - r*0 = 0  ✓
+          world_dy = 0 + r*1 = r  ✓
 
     Yaw update:
       chassis.move(z=+θ) rotates CCW → yaw decreases:
@@ -699,8 +697,8 @@ def move_robot(
         xy_speed=xy_speed, z_speed=z_speed,
     ).wait_for_completed()
 
-    world_dx = x_m * math.cos(pose.yaw) + y_m * math.sin(pose.yaw)
-    world_dy = x_m * math.sin(pose.yaw) - y_m * math.cos(pose.yaw)
+    world_dx = x_m * math.cos(pose.yaw) - y_m * math.sin(pose.yaw)
+    world_dy = x_m * math.sin(pose.yaw) + y_m * math.cos(pose.yaw)
     pose.x += world_dx
     pose.y += world_dy
     pose.yaw = wrap_to_pi(pose.yaw - math.radians(z_deg))
@@ -723,8 +721,8 @@ def integrate_drive_speed(
     Same body-frame / yaw convention as move_robot.
     drive_speed(z=+ω) is CCW → yaw decreases at rate ω deg/s.
     """
-    world_dx = (vx * math.cos(pose.yaw) + vy * math.sin(pose.yaw)) * dt_s
-    world_dy = (vx * math.sin(pose.yaw) - vy * math.cos(pose.yaw)) * dt_s
+    world_dx = (vx * math.cos(pose.yaw) - vy * math.sin(pose.yaw)) * dt_s
+    world_dy = (vx * math.sin(pose.yaw) + vy * math.cos(pose.yaw)) * dt_s
     pose.x += world_dx
     pose.y += world_dy
     pose.yaw = wrap_to_pi(pose.yaw - math.radians(wz_deg_s * dt_s))
@@ -1298,8 +1296,8 @@ def scan_left_and_map_world(
     'Left' in the robot's own frame (body +y = right, so body −y = left).
     chassis.move(y=−step) moves the robot leftward.
 
-    With the robot facing +y (downward, yaw=π/2), robot-left is world −x
-    (toward the left wall), which is the correct sweep direction to cover the
+    With the robot facing +y (downward, yaw=π/2), robot-left is world +x
+    (toward the right wall), which is the correct sweep direction to cover the
     workspace from the starting corner.
     """
     total_left_m = 0.0
@@ -1355,7 +1353,7 @@ def scan_left_and_map_world(
                 return
 
         # Move left in robot body frame: chassis y_m = -step (body +y = right,
-        # so −y = left).  This translates the robot toward the −x world
+        # so −y = left).  This translates the robot toward the +x world
         # direction when facing down (yaw=π/2).
         move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
         total_left_m += LEFT_SCAN_STEP_M
