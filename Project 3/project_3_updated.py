@@ -7,7 +7,7 @@ Coordinate / yaw convention (all code in this file uses this consistently):
   - World +x: rightward along the top edge.
   - World +y: downward along the left edge.
   - Yaw = 0  : robot faces +x (right).
-  - Yaw = π/2: robot faces +y (down) — the start heading.
+  - Yaw = π/2: robot faces +y (down).
   - Yaw increases for a clockwise (CW) turn when viewed from above
     (turning right  → yaw increases).
   - Yaw decreases for a counter-clockwise (CCW) turn when viewed from above
@@ -92,12 +92,12 @@ FT_TO_M = 0.3048
 WORKSPACE_W_M = 10.0 * FT_TO_M   # metres, x-axis
 WORKSPACE_H_M = 10.0 * FT_TO_M   # metres, y-axis
 
-# Robot starts 1 ft from each wall (top-left region), facing +y (downward).
-# START_YAW_RAD = π/2 means the robot points in the +y direction, which is
-# yaw = π/2 in the CW convention used throughout (0=right, π/2=down).
+# Robot starts near the top-left region, facing +x (rightward).
+# START_YAW_RAD = 0 means the robot points toward the recharge block that is
+# directly in front of it at startup.
 START_X_M = 0.20
 START_Y_M = 0.20
-START_YAW_RAD = math.pi / 2.0    # facing +y (downward into arena)
+START_YAW_RAD = 0.0              # facing +x (rightward)
 
 INITIAL_FORWARD_STEP_M = 2.0 * FT_TO_M
 
@@ -115,7 +115,7 @@ LANDMARK_STOP_DIST_M = 0.55
 GOAL_SERVO_DIST_M = 0.30
 RECHARGE_SERVO_DIST_M = 0.22
 DOCK_SEARCH_STEP_DEG = 15.0
-MAX_TAG_SEARCH_STEPS = 24
+MAX_TAG_SEARCH_STEPS = 6
 
 # Re-localisation tolerances.
 REFERENCE_CENTER_TOL_PX = 25.0
@@ -1290,10 +1290,10 @@ def scan_left_and_map_world(
     tag_detector: AprilTagDetector,
     pose: Pose2D,
     world_map: WorldMap,
-    initial_goal_kind: str,
-) -> Landmark:
-    """Translate leftward across the workspace, mapping obstacles and the
-    opposite goal zone.
+    required_obstacles: int = 2,
+) -> None:
+    """Translate leftward across the workspace, mapping both goal zones and
+    the obstacles encountered during the sweep.
 
     'Left' in the robot's own frame (body +y = right, so body −y = left).
     chassis.move(y=−step) moves the robot leftward.
@@ -1302,53 +1302,57 @@ def scan_left_and_map_world(
     (toward the left wall), which is the correct sweep direction to cover the
     workspace from the starting corner.
     """
-    opposite_goal_kind = "large_goal" if initial_goal_kind == "small_goal" else "small_goal"
-    opposite_ids = LARGE_GOAL_TAG_IDS if opposite_goal_kind == "large_goal" else SMALL_GOAL_TAG_IDS
-
     total_left_m = 0.0
     while total_left_m < WORKSPACE_W_M:
         frame = read_frame(ep_camera, timeout=0.5)
         if frame is not None:
             tags, detections = detect_tags_and_objects(frame, yolo_model, tag_detector)
 
-            if len(world_map.obstacles) < 2:
-                mapped_from_tags = False
-                for tag in tags:
-                    tag_id = int(tag.tag_id)
-                    if not is_obstacle_tag(tag_id):
+            for tag in tags:
+                tag_id = int(tag.tag_id)
+                goal_kind = goal_kind_from_tag(tag_id)
+                if goal_kind is not None:
+                    if abs(center_error_px(float(tag.center[0]))) > CENTER_TOL_PX:
                         continue
-                    debug_log_tag_mapping(tag, pose, "obstacle-tag")
-                    lm = landmark_from_tag_detection(tag, "obstacle", pose)
-                    obs = world_map.add_or_update_obstacle(lm.x, lm.y, tag_id=tag_id)
-                    print(f"[Map] obstacle tag {tag_id} at ({obs.x:.3f},{obs.y:.3f})")
-                    mapped_from_tags = True
-                    if len(world_map.obstacles) >= 2:
+                    debug_log_tag_mapping(tag, pose, f"{goal_kind}-sweep")
+                    lm = landmark_from_tag_detection(tag, goal_kind, pose)
+                    lm = world_map.set_goal(goal_kind, lm.x, lm.y, tag_id)
+                    capture_intermediate_reference_if_needed(world_map, lm, tag, pose)
+                    print(f"[Map] {goal_kind} at ({lm.x:.3f},{lm.y:.3f}) tag={tag_id}")
+                    continue
+
+                if len(world_map.obstacles) >= required_obstacles:
+                    continue
+                if not is_obstacle_tag(tag_id):
+                    continue
+                debug_log_tag_mapping(tag, pose, "obstacle-tag")
+                lm = landmark_from_tag_detection(tag, "obstacle", pose)
+                obs = world_map.add_or_update_obstacle(lm.x, lm.y, tag_id=tag_id)
+                print(f"[Map] obstacle tag {tag_id} at ({obs.x:.3f},{obs.y:.3f})")
+
+            if len(world_map.obstacles) < required_obstacles:
+                boxes = [det for det in detections if det.cls == CLASS_BOX]
+                centered = [det for det in boxes if abs(center_error_px(det.cx)) <= CENTER_TOL_PX]
+                for box in centered:
+                    debug_log_box_mapping(box, pose, "obstacle-box-fallback")
+                    world_pos = detection_world_position(box, pose)
+                    if world_pos is None:
+                        continue
+                    if world_map.recharge is not None:
+                        if math.hypot(world_pos[0] - world_map.recharge.x, world_pos[1] - world_map.recharge.y) < 0.40:
+                            continue
+                    obs = world_map.add_or_update_obstacle(world_pos[0], world_pos[1])
+                    print(f"[Map] obstacle fallback at ({obs.x:.3f},{obs.y:.3f})")
+                    if len(world_map.obstacles) >= required_obstacles:
                         break
 
-                if not mapped_from_tags:
-                    boxes = [det for det in detections if det.cls == CLASS_BOX]
-                    centered = [det for det in boxes if abs(center_error_px(det.cx)) <= CENTER_TOL_PX]
-                    for box in centered:
-                        debug_log_box_mapping(box, pose, "obstacle-box-fallback")
-                        world_pos = detection_world_position(box, pose)
-                        if world_pos is None:
-                            continue
-                        if world_map.recharge is not None:
-                            if math.hypot(world_pos[0] - world_map.recharge.x, world_pos[1] - world_map.recharge.y) < 0.40:
-                                continue
-                        obs = world_map.add_or_update_obstacle(world_pos[0], world_pos[1])
-                        print(f"[Map] obstacle fallback at ({obs.x:.3f},{obs.y:.3f})")
-                        if len(world_map.obstacles) >= 2:
-                            break
-
-            tag = find_best_tag(tags, opposite_ids)
-            if tag is not None and abs(center_error_px(float(tag.center[0]))) <= CENTER_TOL_PX:
-                debug_log_tag_mapping(tag, pose, "opposite-goal")
-                lm = landmark_from_tag_detection(tag, opposite_goal_kind, pose)
-                lm = world_map.set_goal(opposite_goal_kind, lm.x, lm.y, int(tag.tag_id))
-                capture_intermediate_reference_if_needed(world_map, lm, tag, pose)
-                print(f"[Map] opposite goal {opposite_goal_kind} at ({lm.x:.3f},{lm.y:.3f})")
-                return lm
+            if (
+                world_map.small_goal is not None
+                and world_map.large_goal is not None
+                and len(world_map.obstacles) >= required_obstacles
+            ):
+                print("[Map] left sweep complete: both goals and required obstacles mapped")
+                return
 
         # Move left in robot body frame: chassis y_m = -step (body +y = right,
         # so −y = left).  This translates the robot toward the −x world
@@ -1356,7 +1360,7 @@ def scan_left_and_map_world(
         move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
         total_left_m += LEFT_SCAN_STEP_M
 
-    raise RuntimeError("Could not map the opposite goal while translating left.")
+    raise RuntimeError("Could not map both goals and the required obstacles while translating left.")
 
 
 def map_loading_dock(
@@ -1386,8 +1390,8 @@ def map_loading_dock(
                     print(f"[Map] dock at ({dock_x:.3f},{dock_y:.3f}) from {len(points)} towers")
                     return world_map.dock
 
-        # Rotate CW (yaw increases) to sweep: chassis z negative.
-        move_robot(ep_chassis, pose, z_deg=-DOCK_SEARCH_STEP_DEG)
+        # Rotate CCW (yaw decreases) to sweep: chassis z positive.
+        move_robot(ep_chassis, pose, z_deg=DOCK_SEARCH_STEP_DEG)
 
     raise RuntimeError("Could not locate the loading dock tower clump.")
 
@@ -1582,46 +1586,29 @@ def execute_mapping_sequence(
 ) -> Landmark:
     """Deterministic mapping path.
 
-    Start state: robot at (0.20, 0.20), yaw = π/2 (facing +y / downward).
+    Start state: robot at (0.20, 0.20), yaw = 0 (facing +x / right).
 
-    Step 1: Map the goal zone directly ahead (facing down into the arena).
-    Step 2: Turn 90° CW (yaw increases π/2 → π) to face the left wall and
-            map the recharge box visible to that side.
-            chassis.move(z=−90) → CW → yaw += π/2.
-    Step 3: Turn back 90° CCW (yaw decreases π → π/2) to face down again.
-            chassis.move(z=+90) → CCW → yaw −= π/2.
-    Step 4: Move 2 ft forward (downward in world).
-    Step 5: Translate left while mapping obstacles + the opposite goal.
-    Step 6: Turn 180° to face upward and map the loading dock.
+    Step 1: Without moving, map the recharge block directly ahead.
+    Step 2: Turn 90° CW to face downward into the arena.
+    Step 3: Move 2 ft forward.
+    Step 4: Translate left while mapping both goal zones and the two obstacles.
+    Step 5: Turn 180° to face upward and map the loading dock.
     """
-    # Step 1 — initial forward-facing goal.
-    initial_goal = map_goal_from_view(
-        ep_camera, yolo_model, tag_detector, pose, world_map,
-        SMALL_GOAL_TAG_IDS | LARGE_GOAL_TAG_IDS,
-        "initial front goal",
-    )
-
-    # Step 2 — turn CW 90° (z_deg = -90 → CCW z → wait, CW = yaw increase,
-    # chassis z positive = CCW = yaw decrease, so CW = z negative).
-    # Current yaw = π/2; after CW 90° → yaw = π (facing left wall / +x side).
-    move_robot(ep_chassis, pose, z_deg=-90.0)
+    # Step 1 — map the recharge block directly ahead at the start pose.
     map_recharge_from_box(ep_camera, yolo_model, tag_detector, pose, world_map)
 
-    # Step 3 — turn CCW 90° back to face downward.
-    # chassis.move(z=+90) → CCW → yaw decreases 90° → yaw = π/2 again.
-    move_robot(ep_chassis, pose, z_deg=90.0)
+    # Step 2 — turn CW 90° so the robot faces +y (downward into the arena).
+    # In the chassis convention, CW is z_deg negative.
+    move_robot(ep_chassis, pose, z_deg=-90.0)
 
-    # Step 4 — move forward 2 ft (deeper into the arena, +y world direction).
+    # Step 3 — move forward 2 ft (deeper into the arena, +y world direction).
     move_robot(ep_chassis, pose, x_m=INITIAL_FORWARD_STEP_M)
 
-    # Step 5 — translate left while scanning.
-    scan_left_and_map_world(
-        ep_camera, ep_chassis, yolo_model, tag_detector,
-        pose, world_map, initial_goal.kind,
-    )
+    # Step 4 — translate left while scanning.
+    scan_left_and_map_world(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
     print(f"[Map] blocks mapped so far: {world_map.mapped_block_count()}")
 
-    # Step 6 — turn 180° to face upward (+y → -y, i.e. yaw = π/2 → -π/2).
+    # Step 5 — turn 180° to face upward (+y → -y, i.e. yaw = π/2 → -π/2).
     # 180° CCW: chassis.move(z=+180) → yaw −= π → yaw = π/2 - π = -π/2 ✓.
     move_robot(ep_chassis, pose, z_deg=180.0)
     map_loading_dock(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
