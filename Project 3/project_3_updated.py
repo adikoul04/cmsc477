@@ -1435,9 +1435,21 @@ def scan_left_and_map_world(
         frame = read_frame(ep_camera, timeout=0.5)
         if frame is not None:
             tags, detections = detect_tags_and_objects(frame, yolo_model, tag_detector)
+            unmapped_tags = [
+                tag for tag in tags
+                if is_unmapped_sweep_tag(int(tag.tag_id), world_map, required_obstacles)
+            ]
+            priority_tag = None
+            right_of_center_unmapped_tags = [
+                tag for tag in unmapped_tags
+                if center_error_px(float(tag.center[0])) > 0.0
+            ]
+            if right_of_center_unmapped_tags:
+                priority_tag = max(right_of_center_unmapped_tags, key=lambda tag: float(tag.center[0]))
             tags = sorted(
                 tags,
                 key=lambda tag: (
+                    0 if tag is priority_tag else 1,
                     0 if is_unmapped_sweep_tag(int(tag.tag_id), world_map, required_obstacles) else 1,
                     -float(tag.center[0]),
                 ),
@@ -1449,8 +1461,18 @@ def scan_left_and_map_world(
                 if goal_kind is not None:
                     if world_map.goal_for_kind(goal_kind) is not None:
                         continue
-                    if abs(center_error_px(float(tag.center[0]))) > CENTER_TOL_PX:
+                    is_priority_tag = priority_tag is not None and tag is priority_tag
+                    if (
+                        abs(center_error_px(float(tag.center[0]))) > CENTER_TOL_PX
+                        and not is_priority_tag
+                    ):
                         continue
+                    if is_priority_tag:
+                        print(
+                            f"[Map] prioritizing rightmost unseen tag {tag_id} "
+                            f"at x={float(tag.center[0]):.1f}px because it is right of center "
+                            "and may leave the frame on the next left step"
+                        )
                     debug_log_tag_mapping(tag, pose, f"{goal_kind}-sweep")
                     lm = landmark_from_tag_detection(tag, goal_kind, pose)
                     lm = world_map.set_goal(goal_kind, lm.x, lm.y, tag_id)
