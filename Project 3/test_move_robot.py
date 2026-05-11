@@ -52,28 +52,40 @@ def main() -> None:
     ep_chassis = ep_robot.chassis
 
     try:
-        p3.move_robot(ep_chassis, pose, z_deg=90.0)
-        print_pose("after 90 left", pose)
+        # p3.move_robot(ep_chassis, pose, z_deg=90.0)
+        # print_pose("after 90 left", pose)
+        # time.sleep(args.pause_s)
+
+        # p3.move_robot(ep_chassis, pose, z_deg=-90.0)
+        # print_pose("after 90 right", pose)
+        # time.sleep(args.pause_s)
+
+        # p3.move_robot(ep_chassis, pose, x_m=1.0)
+        # print_pose("after forward 1m", pose)
+        # time.sleep(args.pause_s)
+
+        # p3.move_robot(ep_chassis, pose, z_deg=180.0)
+        # print_pose("after 180 turn", pose)
+        # time.sleep(args.pause_s)
+
+        # p3.move_robot(ep_chassis, pose, x_m=1.0)
+        # print_pose("after second forward 1m", pose)
+        # time.sleep(args.pause_s)
+
+        # p3.move_robot(ep_chassis, pose, z_deg=180.0)
+        # print_pose("after final 180 turn", pose)
+
+        ep_chassis.move(x=1.0, y=0.0, z=0.0, xy_speed=0.50, z_speed=0).wait_for_completed()
         time.sleep(args.pause_s)
 
-        p3.move_robot(ep_chassis, pose, z_deg=-90.0)
-        print_pose("after 90 right", pose)
+        ep_chassis.move(x=0.0, y=1.0, z=0.0, xy_speed=0.50, z_speed=0).wait_for_completed()
         time.sleep(args.pause_s)
 
-        p3.move_robot(ep_chassis, pose, x_m=1.0)
-        print_pose("after forward 1m", pose)
+        ep_chassis.move(x=-1.0, y=0.0, z=0.0, xy_speed=0.50, z_speed=0).wait_for_completed()
         time.sleep(args.pause_s)
 
-        p3.move_robot(ep_chassis, pose, z_deg=180.0)
-        print_pose("after 180 turn", pose)
+        ep_chassis.move(x=0.0, y=-1.0, z=0.0, xy_speed=0.50, z_speed=0).wait_for_completed()
         time.sleep(args.pause_s)
-
-        p3.move_robot(ep_chassis, pose, x_m=1.0)
-        print_pose("after second forward 1m", pose)
-        time.sleep(args.pause_s)
-
-        p3.move_robot(ep_chassis, pose, z_deg=180.0)
-        print_pose("after final 180 turn", pose)
 
     finally:
         try:
