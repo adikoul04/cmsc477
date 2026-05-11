@@ -360,6 +360,12 @@ class AprilTagDetector:
         """3-D Euclidean distance from camera to the tag face centre (metres)."""
         return float(np.linalg.norm(np.array(detection.pose_t, dtype=float).reshape(3)))
 
+    @staticmethod
+    def tag_forward_distance_m(detection) -> float:
+        """Forward camera-axis distance to the tag face centre (metres)."""
+        pose_t = np.array(detection.pose_t, dtype=float).reshape(3)
+        return float(pose_t[2])
+
 
 # ---------------------------------------------------------------------------
 # Pure math helpers
@@ -1006,9 +1012,45 @@ def find_best_tag(tags: Sequence, valid_ids: Iterable[int]):
     return min(matches, key=AprilTagDetector.tag_distance_m)
 
 
+def face_landmark(ep_chassis, pose: Pose2D, landmark: Landmark) -> None:
+    """Turn in place so the robot faces the mapped landmark location."""
+    dx = landmark.x - pose.x
+    dy = landmark.y - pose.y
+    if math.hypot(dx, dy) <= 1e-6:
+        return
+    turn_to_yaw(ep_chassis, pose, math.atan2(dy, dx))
+
+
 def center_error_px(cx_px: float) -> float:
     """Signed pixel error from image centre (+ve = object is to the right)."""
     return float(cx_px) - _CX
+
+
+def tag_area_px2(tag) -> float:
+    corners = np.array(tag.corners, dtype=float).reshape((-1, 2))
+    return float(abs(cv2.contourArea(corners.astype(np.float32))))
+
+
+def select_preferred_visible_tag(tags: Sequence, valid_ids: Iterable[int]):
+    """Pick the recharge/goal tag with the strongest current visual lock.
+
+    Preference order:
+      1. larger image area (more visible / less oblique / usually closer)
+      2. smaller horizontal centre error
+      3. smaller forward distance
+    """
+    valid_set = set(valid_ids)
+    matches = [tag for tag in tags if int(tag.tag_id) in valid_set]
+    if not matches:
+        return None
+    return max(
+        matches,
+        key=lambda tag: (
+            tag_area_px2(tag),
+            -abs(center_error_px(float(tag.center[0]))),
+            -AprilTagDetector.tag_forward_distance_m(tag),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1574,8 +1616,8 @@ def servo_to_visible_tag(
         if frame is None:
             continue
         tags, _ = detect_tags_and_objects(frame, yolo_model, tag_detector)
-        matches = [tag for tag in tags if int(tag.tag_id) in valid_set]
-        if not matches:
+        tag = select_preferred_visible_tag(tags, valid_set)
+        if tag is None:
             # Slowly sweep CW (yaw increases): z negative for drive_speed.
             wz = -10.0
             dt = 0.15
@@ -1584,17 +1626,16 @@ def servo_to_visible_tag(
             integrate_drive_speed(pose, 0.0, 0.0, wz, dt)
             continue
 
-        tag = min(matches, key=tag_detector.tag_distance_m)
         err_px = center_error_px(float(tag.center[0]))
-        err_dist_m = tag_detector.tag_distance_m(tag) - target_dist_m
+        err_dist_m = tag_detector.tag_forward_distance_m(tag) - target_dist_m
         if abs(err_px) < 18.0 and abs(err_dist_m) < 0.04:
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
             time.sleep(0.1)
             return True
 
-        vx = max(-0.16, min(0.16, 0.6 * err_dist_m))
+        vx = max(-0.10, min(0.10, 0.45 * err_dist_m))
         # Positive err_px → tag to the right → turn CW → z negative.
-        wz = max(-30.0, min(30.0, -0.08 * err_px))
+        wz = max(-24.0, min(24.0, -0.08 * err_px))
         dt = 0.15
         ep_chassis.drive_speed(x=vx, y=0.0, z=wz, timeout=dt)
         time.sleep(dt)
@@ -1703,12 +1744,14 @@ def recharge_robot(
         world_map.recharge.x, world_map.recharge.y,
         stop_dist_m=LANDMARK_STOP_DIST_M,
     )
+    face_landmark(ep_chassis, pose, world_map.recharge)
     try_refine_recharge_from_tag(ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map)
     navigate_to_point_with_map(
         ep_chassis, pose, world_map,
         world_map.recharge.x, world_map.recharge.y,
         stop_dist_m=max(RECHARGE_SERVO_DIST_M + 0.10, 0.30),
     )
+    face_landmark(ep_chassis, pose, world_map.recharge)
     success = servo_to_visible_tag(
         ep_camera, ep_chassis, yolo_model, tag_detector, pose,
         RECHARGE_TAG_IDS, target_dist_m=RECHARGE_SERVO_DIST_M,
