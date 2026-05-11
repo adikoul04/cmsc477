@@ -1861,7 +1861,14 @@ def run_delivery_loop(
 # Visualisation (debug)
 # ---------------------------------------------------------------------------
 
-def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> None:
+def visualize_map(
+    world_map: WorldMap,
+    robot_pose: Optional[Pose2D] = None,
+    *,
+    filename: str = "arena_map.png",
+    title: str = "Project 3 Map (top-left origin, +y down)",
+    show_window: bool = True,
+) -> None:
     """Bird's-eye debug plot.  World +y is rendered downward to match the
     workspace convention (+x right, +y down, origin top-left).
     """
@@ -1878,7 +1885,7 @@ def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> N
     ax.set_aspect("equal")
     ax.set_xlabel("x (m)  →  rightward")
     ax.set_ylabel("y (m)  ↓  downward")
-    ax.set_title("Project 3 Map (top-left origin, +y down)")
+    ax.set_title(title)
 
     for v in np.arange(0.0, WORKSPACE_W_M + 0.01, 0.10):
         ax.axvline(v, color="lightgray", linewidth=0.3)
@@ -1894,11 +1901,14 @@ def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> N
     for obs in world_map.obstacles:
         ax.add_patch(plt.Circle((obs.x, obs.y), 0.12, color="red", alpha=0.6))
 
-    if len(world_map.path_points) >= 2:
+    if world_map.path_points:
         xs = [point[0] for point in world_map.path_points]
         ys = [point[1] for point in world_map.path_points]
-        ax.plot(xs, ys, color="magenta", linewidth=1.6, alpha=0.85, label="robot path")
-        ax.scatter(xs, ys, color="magenta", s=10, alpha=0.75)
+        if len(world_map.path_points) >= 2:
+            ax.plot(xs, ys, color="magenta", linewidth=2.2, alpha=0.90, label="robot path", zorder=3)
+        ax.scatter(xs, ys, color="magenta", s=18, alpha=0.85, zorder=4)
+        ax.plot(xs[0], ys[0], marker="o", color="cyan", markersize=9, label="start", zorder=5)
+        ax.plot(xs[-1], ys[-1], marker="X", color="magenta", markersize=11, label="path end", zorder=6)
 
     if world_map.recharge:
         ax.add_patch(patches.Rectangle(
@@ -1917,7 +1927,7 @@ def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> N
         ))
 
     if robot_pose is not None:
-        ax.plot(robot_pose.x, robot_pose.y, "ms", markersize=10, label="robot")
+        ax.plot(robot_pose.x, robot_pose.y, marker="s", color="magenta", markersize=12, label="robot", zorder=7)
         # Arrow in world direction of current yaw.
         # With +y downward axes, cos(yaw) gives Δx (rightward) and sin(yaw)
         # gives Δy (downward) — both consistent with matplotlib's natural axes
@@ -1928,14 +1938,17 @@ def visualize_map(world_map: WorldMap, robot_pose: Optional[Pose2D] = None) -> N
             "",
             xy=(robot_pose.x + dx, robot_pose.y + dy),
             xytext=(robot_pose.x, robot_pose.y),
-            arrowprops=dict(arrowstyle="->", color="magenta", lw=2),
+            arrowprops=dict(arrowstyle="->", color="magenta", lw=2.5),
         )
 
     ax.legend(loc="upper right")
     plt.tight_layout()
-    plt.savefig("arena_map.png", dpi=150)
-    print("[Map] Saved arena_map.png")
-    plt.show()
+    plt.savefig(filename, dpi=150)
+    print(f"[Map] Saved {filename}")
+    if show_window:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -1992,6 +2005,14 @@ def main() -> None:
         execute_mapping_sequence(
             ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map,
         )
+        if args.show_map or args.map_only:
+            visualize_map(
+                world_map,
+                pose,
+                filename="arena_map_mapping_complete.png",
+                title="Project 3 Map After Mapping",
+                show_window=bool(args.show_map),
+            )
         print("[Mission] Mapping complete. Navigating to recharge station and ending there.")
         recharge_robot(
             ep_camera, ep_chassis, yolo_model, tag_detector,
@@ -2001,7 +2022,13 @@ def main() -> None:
         print(world_map.summary())
 
         if args.show_map or args.map_only:
-            visualize_map(world_map, pose)
+            visualize_map(
+                world_map,
+                pose,
+                filename="arena_map_after_recharge.png",
+                title="Project 3 Map After Reaching Recharge",
+                show_window=bool(args.show_map),
+            )
 
     finally:
         try:
