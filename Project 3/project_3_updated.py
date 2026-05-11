@@ -1766,7 +1766,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--conn-type", default="sta", choices=["sta", "ap"])
     parser.add_argument("--resolution", default="360p", choices=["360p", "720p"])
     parser.add_argument("--map-only", action="store_true")
-    parser.add_argument("--show-map", action="store_true")
+    parser.add_argument("--show-map", action="store_true", default=True,
+                        help="Show and save the generated map (default: True)")
     parser.add_argument("--max-deliveries", type=int, default=3)
     return parser.parse_args()
 
@@ -1806,6 +1807,11 @@ def main() -> None:
         )
         print(world_map.summary())
 
+        # Generate and save the map immediately after the mapping sequence
+        # completes so the saved PNG reflects the mapped obstacles/loading dock.
+        if args.show_map or args.map_only:
+            visualize_map(world_map, pose)
+
         if not args.map_only:
             run_delivery_loop(
                 ep_robot, ep_camera, ep_chassis,
@@ -1813,9 +1819,6 @@ def main() -> None:
                 pose, world_map, battery,
                 target_goal, args.max_deliveries,
             )
-
-        if args.show_map or args.map_only:
-            visualize_map(world_map, pose)
 
     finally:
         try:

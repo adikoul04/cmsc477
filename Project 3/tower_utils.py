@@ -225,6 +225,8 @@ def pick_up_tower(
         _print_latest_arm_position(arm_state, "after lower while retracted")
         # ep_arm.moveto(x=225, y=lower_y).wait_for_completed()
         # time.sleep(grip_wait_seconds)
+
+        # Moves forward to get to the tower
         ep_chassis.move(x=0.07, y=0, z=0, xy_speed=0.35).wait_for_completed()
 
 
@@ -243,6 +245,9 @@ def pick_up_tower(
         time.sleep(grip_wait_seconds)
 
         _print_latest_arm_position(arm_state, "after retract raised")
+
+        # Moves backward to get back to original position
+        ep_chassis.move(x=-0.07, y=0, z=0, xy_speed=0.35).wait_for_completed()
         return ep_robot
     finally:
         _stop_arm_position_logging(ep_robot.robotic_arm, arm_state)
@@ -282,10 +287,14 @@ def place_down_tower(
         ep_arm.moveto(x=arm_x, y=lower_y).wait_for_completed()
         _print_latest_arm_position(arm_state, "after lower to place")
 
+        # Moves forward to place the tower
+        ep_chassis.move(x=0.07, y=0, z=0, xy_speed=0.35).wait_for_completed()
+
         ep_gripper.open(power=gripper_power)
         time.sleep(grip_wait_seconds)
         ep_gripper.pause()
 
+        # Backs up so no change in position
         ep_chassis.move(x=-0.07, y=0, z=0, xy_speed=0.35).wait_for_completed()
 
         ep_arm.moveto(x=DEFAULT_ARM_X, y=DEFAULT_ARM_Y).wait_for_completed()
