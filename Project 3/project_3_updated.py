@@ -256,7 +256,7 @@ class WorldMap:
     def summary(self) -> str:
         def fmt(lm: Optional[Landmark]) -> str:
             return "NOT FOUND" if lm is None else f"({lm.x:.2f}, {lm.y:.2f})"
-        return "\n".join([
+        lines = [
             "=== WorldMap ===",
             f"  recharge:   {fmt(self.recharge)}",
             f"  small_goal: {fmt(self.small_goal)}",
@@ -264,7 +264,10 @@ class WorldMap:
             f"  dock:       {fmt(self.dock)}",
             f"  intermediate: {fmt(self.intermediate)}",
             f"  obstacles:  {len(self.obstacles)}",
-        ])
+        ]
+        for idx, obstacle in enumerate(self.obstacles, start=1):
+            lines.append(f"    obstacle_{idx}: ({obstacle.x:.2f}, {obstacle.y:.2f})")
+        return "\n".join(lines)
 
 
 class BatteryManager:
@@ -1040,14 +1043,12 @@ def debug_log_box_mapping(detection: Detection, pose: Pose2D, label: str) -> Non
 # Servo / localisation helpers
 # ---------------------------------------------------------------------------
 
-def capture_intermediate_reference_if_needed(
+def record_intermediate_reference(
     world_map: WorldMap,
     goal: Landmark,
     tag,
     pose: Pose2D,
 ) -> None:
-    if world_map.intermediate is not None or world_map.dropoff_tag_ref is not None:
-        return
     if goal.kind not in ("small_goal", "large_goal"):
         return
     world_map.intermediate = Landmark(kind="intermediate", x=pose.x, y=pose.y)
@@ -1318,8 +1319,15 @@ def scan_left_and_map_world(
                     debug_log_tag_mapping(tag, pose, f"{goal_kind}-sweep")
                     lm = landmark_from_tag_detection(tag, goal_kind, pose)
                     lm = world_map.set_goal(goal_kind, lm.x, lm.y, tag_id)
-                    capture_intermediate_reference_if_needed(world_map, lm, tag, pose)
                     print(f"[Map] {goal_kind} at ({lm.x:.3f},{lm.y:.3f}) tag={tag_id}")
+                    if (
+                        world_map.small_goal is not None
+                        and world_map.large_goal is not None
+                        and len(world_map.obstacles) >= required_obstacles
+                    ):
+                        record_intermediate_reference(world_map, lm, tag, pose)
+                        print("[Map] left sweep complete: both goals and required obstacles mapped")
+                        return
                     continue
 
                 if len(world_map.obstacles) >= required_obstacles:
@@ -1330,22 +1338,6 @@ def scan_left_and_map_world(
                 lm = landmark_from_tag_detection(tag, "obstacle", pose)
                 obs = world_map.add_or_update_obstacle(lm.x, lm.y, tag_id=tag_id)
                 print(f"[Map] obstacle tag {tag_id} at ({obs.x:.3f},{obs.y:.3f})")
-
-            if len(world_map.obstacles) < required_obstacles:
-                boxes = [det for det in detections if det.cls == CLASS_BOX]
-                centered = [det for det in boxes if abs(center_error_px(det.cx)) <= CENTER_TOL_PX]
-                for box in centered:
-                    debug_log_box_mapping(box, pose, "obstacle-box-fallback")
-                    world_pos = detection_world_position(box, pose)
-                    if world_pos is None:
-                        continue
-                    if world_map.recharge is not None:
-                        if math.hypot(world_pos[0] - world_map.recharge.x, world_pos[1] - world_map.recharge.y) < 0.40:
-                            continue
-                    obs = world_map.add_or_update_obstacle(world_pos[0], world_pos[1])
-                    print(f"[Map] obstacle fallback at ({obs.x:.3f},{obs.y:.3f})")
-                    if len(world_map.obstacles) >= required_obstacles:
-                        break
 
             if (
                 world_map.small_goal is not None
@@ -1617,9 +1609,8 @@ def execute_mapping_sequence(
     target_goal = world_map.right_side_goal()
     if target_goal is None:
         raise RuntimeError("No drop-off goal was mapped.")
-    if world_map.intermediate is None:
-        world_map.intermediate = Landmark(kind="intermediate", x=pose.x, y=pose.y)
-        print(f"[Map] fallback intermediate at ({pose.x:.3f},{pose.y:.3f})")
+    if world_map.intermediate is None or world_map.dropoff_tag_ref is None:
+        raise RuntimeError("Intermediate waypoint was not recorded from the final goal-tag observation.")
     print(f"[Mission] right-side goal: {target_goal.kind} at ({target_goal.x:.3f},{target_goal.y:.3f})")
     return target_goal
 
