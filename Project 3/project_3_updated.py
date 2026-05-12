@@ -73,6 +73,9 @@ from config import (
     LARGE_GOAL_TAG_IDS,
     MODEL_PATH,
     MOVE_SPEED_MPS,
+    OBSTACLE_1_FALLBACK_POSITION,
+    OBSTACLE_2_FALLBACK_POSITION,
+    DOCK_FALLBACK_POSITION,
     RECHARGE_TAG_IDS,
     ROBOT_IP,
     ROBOT_SN,
@@ -111,11 +114,11 @@ OBSTACLE_PATH_CLEARANCE_M = 0.38
 OBSTACLE_DETOUR_MARGIN_M = 0.28
 OBSTACLE_FALLBACK_RADIUS_M = 0.70
 OBSTACLE_FALLBACK_POSITIONS: Tuple[Tuple[float, float], ...] = (
-    (1.2, 1.7),
-    (1.9, 1.8),
+    OBSTACLE_1_FALLBACK_POSITION,
+    OBSTACLE_2_FALLBACK_POSITION,
 )
 DOCK_FALLBACK_RADIUS_M = 0.70
-DOCK_FALLBACK_POSITION: Tuple[float, float] = (2.46, 0.48)
+DOCK_FALLBACK_POSITION: Tuple[float, float] = DOCK_FALLBACK_POSITION
 
 # Navigation stop distances.
 LANDMARK_STOP_DIST_M = 0.55
@@ -1761,8 +1764,14 @@ def recharge_robot(
     if world_map.recharge is None:
         raise RuntimeError("Recharge requested before recharge was mapped.")
     print(
-        f"[Recharge] Turning from ({pose.x:.3f}, {pose.y:.3f}, {math.degrees(pose.yaw):.1f}°) "
-        f"to face recharge at ({world_map.recharge.x:.3f}, {world_map.recharge.y:.3f})"
+        f"[Recharge] Repositioning from ({pose.x:.3f}, {pose.y:.3f}, {math.degrees(pose.yaw):.1f}°) "
+        f"before final approach to recharge at ({world_map.recharge.x:.3f}, {world_map.recharge.y:.3f})"
+    )
+    turn_to_yaw(ep_chassis, pose, math.pi)
+    move_robot(ep_chassis, pose, x_m=2.0)
+    print(
+        f"[Recharge] Final turn to face recharge from ({pose.x:.3f}, {pose.y:.3f}, "
+        f"{math.degrees(pose.yaw):.1f}°)"
     )
     face_landmark(ep_chassis, pose, world_map.recharge)
     success = servo_to_visible_tag(
