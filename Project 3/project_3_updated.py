@@ -1634,10 +1634,10 @@ def sweep_left_until_recharge_tag_centered(
                 total_left_m -= LEFT_SCAN_STEP_M
                 continue
 
-        if total_left_m - LEFT_SCAN_STEP_M < 0:
-            break
-        move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
-        total_left_m -= LEFT_SCAN_STEP_M
+        # if total_left_m - LEFT_SCAN_STEP_M < 0:
+        #     break
+        # move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
+        # total_left_m -= LEFT_SCAN_STEP_M
 
 
     return None
