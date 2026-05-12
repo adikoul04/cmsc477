@@ -2011,7 +2011,7 @@ def visualize_map(
     *,
     filename: str = "arena_map.png",
     title: str = "Project 3 Map (top-left origin, +y down)",
-    show_window: bool = True,
+    show_window: bool = False,
 ) -> None:
     """Bird's-eye debug plot.  World +y is rendered downward to match the
     workspace convention (+x right, +y down, origin top-left).
@@ -2107,8 +2107,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--conn-type", default="sta", choices=["sta", "ap"])
     parser.add_argument("--resolution", default="360p", choices=["360p", "720p"])
     parser.add_argument("--map-only", action="store_true")
-    parser.add_argument("--show-map", action="store_true", default=True,
-                        help="Show and save the generated map (default: True)")
+    parser.add_argument("--show-map", action="store_true", default=False,
+                        help="Show the generated map windows in addition to saving the PNGs")
     parser.add_argument("--max-deliveries", type=int, default=3)
     return parser.parse_args()
 
@@ -2150,14 +2150,13 @@ def main() -> None:
             ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map,
         )
         print(world_map.summary())
-        if args.show_map or args.map_only:
-            visualize_map(
-                world_map,
-                pose,
-                filename="arena_map_mapping_complete.png",
-                title="Project 3 Map After Mapping",
-                show_window=bool(args.show_map),
-            )
+        visualize_map(
+            world_map,
+            pose,
+            filename="arena_map_mapping_complete.png",
+            title="Project 3 Map After Mapping",
+            show_window=False,
+        )
         print("[Mission] Mapping complete. Navigating to recharge station and ending there.")
         recharge_robot(
             ep_camera, ep_chassis, yolo_model, tag_detector,
@@ -2165,14 +2164,13 @@ def main() -> None:
             leave_after_recharge=False,
         )
 
-        if args.show_map or args.map_only:
-            visualize_map(
-                world_map,
-                pose,
-                filename="arena_map_after_recharge.png",
-                title="Project 3 Map After Reaching Recharge",
-                show_window=bool(args.show_map),
-            )
+        visualize_map(
+            world_map,
+            pose,
+            filename="arena_map_after_recharge.png",
+            title="Project 3 Map After Reaching Recharge",
+            show_window=False,
+        )
 
     finally:
         try:
