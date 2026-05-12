@@ -1768,10 +1768,11 @@ def servo_to_visible_tag(
         if straight_approach_active:
             vx = max(0.0, vx)
             wz = 0.0
+            dt = 0.5
         else:
             # Positive err_px → tag to the right → turn CCW → z positive.
             wz = max(-24.0, min(24.0, 0.08 * err_px))
-        dt = 0.15
+            dt = 0.15
         ep_chassis.drive_speed(x=vx, y=0.0, z=wz, timeout=dt)
         time.sleep(dt)
         integrate_drive_speed(pose, vx, 0.0, wz, dt)
