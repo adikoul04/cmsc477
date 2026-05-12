@@ -1587,9 +1587,17 @@ def sweep_left_until_recharge_tag_centered(
     target_tag_id: int,
     max_left_m: float = WORKSPACE_W_M,
 ) -> Optional[object]:
-    """Translate left until the requested recharge tag is horizontally centred."""
+    """Translate left until the requested recharge tag is horizontally centred.
+
+    Behaviour:
+      - No tag / tag left of centre  -> continue sweeping left.
+      - Tag centred                  -> return it after a stable lock.
+      - Tag right of centre          -> recover by stepping right in 5 cm increments
+                                        until the tag is back within tolerance.
+    """
     total_left_m = pose.x
     centered_stable = 0
+    corrective_right_step_m = 0.05
 
     while total_left_m >= 0:
         frame = read_frame(ep_camera, timeout=0.5)
@@ -1602,6 +1610,15 @@ def sweep_left_until_recharge_tag_centered(
                     centered_stable += 1
                     if centered_stable >= 2:
                         return tag
+                elif err_px > 0.0:
+                    centered_stable = 0
+                    print(
+                        f"[Recharge] Tag {target_tag_id} is right of center by {err_px:.1f}px; "
+                        f"stepping right {corrective_right_step_m:.2f} m to re-center."
+                    )
+                    move_robot(ep_chassis, pose, y_m=corrective_right_step_m)
+                    total_left_m = min(pose.x, total_left_m + corrective_right_step_m)
+                    continue
                 else:
                     centered_stable = 0
             else:
