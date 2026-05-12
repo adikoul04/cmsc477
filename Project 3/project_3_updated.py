@@ -76,6 +76,9 @@ from config import (
     OBSTACLE_1_FALLBACK_POSITION,
     OBSTACLE_2_FALLBACK_POSITION,
     DOCK_FALLBACK_POSITION,
+    GOAL_TAG_SAME_BLOCK_PAIRS,
+    RECHARGE_ALIGNMENT_TAG_ID,
+    RECHARGE_STOP_DIST_M,
     RECHARGE_TAG_IDS,
     ROBOT_IP,
     ROBOT_SN,
@@ -123,7 +126,6 @@ DOCK_FALLBACK_POSITION: Tuple[float, float] = DOCK_FALLBACK_POSITION
 # Navigation stop distances.
 LANDMARK_STOP_DIST_M = 0.55
 GOAL_SERVO_DIST_M = 0.30
-RECHARGE_SERVO_DIST_M = 0.22
 DOCK_SEARCH_STEP_DEG = 15.0
 MAX_TAG_SEARCH_STEPS = 6
 
@@ -221,6 +223,7 @@ class WorldMap:
     obstacles: List[Landmark] = field(default_factory=list)
     fallback_notes: List[str] = field(default_factory=list)
     path_points: List[Tuple[float, float]] = field(default_factory=list)
+    seen_goal_tag_ids: set[int] = field(default_factory=set)
 
     def goal_for_kind(self, kind: str) -> Optional[Landmark]:
         if kind == "small_goal":
@@ -238,6 +241,7 @@ class WorldMap:
             self.small_goal = landmark
         else:
             self.large_goal = landmark
+        self.seen_goal_tag_ids.add(tag_id)
         return landmark
 
     def add_or_update_obstacle(self, x: float, y: float, tag_id: Optional[int] = None) -> Landmark:
@@ -388,6 +392,25 @@ def goal_kind_from_tag(tag_id: int) -> Optional[str]:
     if tag_id in LARGE_GOAL_TAG_IDS:
         return "large_goal"
     return None
+
+
+GOAL_TAG_TO_SAME_BLOCK_TAG = {
+    tag_id: partner
+    for a, b in GOAL_TAG_SAME_BLOCK_PAIRS
+    for tag_id, partner in ((a, b), (b, a))
+}
+
+
+def goal_tag_should_be_ignored(tag_id: int, world_map: WorldMap) -> bool:
+    goal_kind = goal_kind_from_tag(tag_id)
+    if goal_kind is None:
+        return False
+    if world_map.goal_for_kind(goal_kind) is not None:
+        return True
+    partner_tag_id = GOAL_TAG_TO_SAME_BLOCK_TAG.get(tag_id)
+    if partner_tag_id is not None and partner_tag_id in world_map.seen_goal_tag_ids:
+        return True
+    return tag_id in world_map.seen_goal_tag_ids
 
 
 def is_obstacle_tag(tag_id: int) -> bool:
@@ -1354,7 +1377,7 @@ def wait_for_goal_tag(
 def is_unmapped_sweep_tag(tag_id: int, world_map: WorldMap, required_obstacles: int) -> bool:
     goal_kind = goal_kind_from_tag(tag_id)
     if goal_kind is not None:
-        return world_map.goal_for_kind(goal_kind) is None
+        return not goal_tag_should_be_ignored(tag_id, world_map)
     if not is_obstacle_tag(tag_id):
         return False
     if len(world_map.obstacles) >= required_obstacles:
@@ -1377,6 +1400,8 @@ def map_goal_from_view(
     goal_kind = goal_kind_from_tag(tag_id)
     if goal_kind is None:
         raise RuntimeError(f"Tag {tag_id} is not configured as a goal tag.")
+    if goal_tag_should_be_ignored(tag_id, world_map):
+        raise RuntimeError(f"Tag {tag_id} should be ignored because its goal/block was already mapped.")
     debug_log_tag_mapping(tag, pose, label)
     landmark = landmark_from_tag_detection(tag, goal_kind, pose)
     landmark = world_map.set_goal(goal_kind, landmark.x, landmark.y, tag_id)
@@ -1462,7 +1487,7 @@ def scan_left_and_map_world(
                 tag_id = int(tag.tag_id)
                 goal_kind = goal_kind_from_tag(tag_id)
                 if goal_kind is not None:
-                    if world_map.goal_for_kind(goal_kind) is not None:
+                    if goal_tag_should_be_ignored(tag_id, world_map):
                         continue
                     is_priority_tag = priority_tag is not None and tag is priority_tag
                     if (
@@ -1553,6 +1578,44 @@ def scan_left_and_map_world(
     raise RuntimeError("Could not map both goals and the required obstacles while translating left.")
 
 
+def sweep_left_until_recharge_tag_centered(
+    ep_camera,
+    ep_chassis,
+    yolo_model: YOLO,
+    tag_detector: AprilTagDetector,
+    pose: Pose2D,
+    target_tag_id: int,
+    max_left_m: float = WORKSPACE_W_M,
+) -> Optional[object]:
+    """Translate left until the requested recharge tag is horizontally centred."""
+    total_left_m = pose.x
+    centered_stable = 0
+
+    while total_left_m >= 0:
+        frame = read_frame(ep_camera, timeout=0.5)
+        if frame is not None:
+            tags, _ = detect_tags_and_objects(frame, yolo_model, tag_detector)
+            tag = find_best_tag(tags, {target_tag_id})
+            if tag is not None:
+                err_px = center_error_px(float(tag.center[0]))
+                if abs(err_px) <= CENTER_TOL_PX:
+                    centered_stable += 1
+                    if centered_stable >= 2:
+                        return tag
+                else:
+                    centered_stable = 0
+            else:
+                centered_stable = 0
+
+        if total_left_m - LEFT_SCAN_STEP_M < 0:
+            break
+        move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
+        total_left_m -= LEFT_SCAN_STEP_M
+        
+
+    return None
+
+
 def map_loading_dock(
     ep_camera,
     ep_chassis,
@@ -1630,9 +1693,9 @@ def servo_to_visible_tag(
 
     Yaw correction:
       A positive center error (tag right of image centre) means the robot must
-      turn CW (yaw increases) to centre the tag.  drive_speed(z=+ω) is CCW
-      (yaw decreases), so to turn CW we use a negative z value:
-          wz = -K * err_px   (negative when tag is to the right)
+      turn CCW (yaw decreases) to centre the tag. drive_speed(z=+ω) is CCW,
+      so we use a positive z value when the tag is to the right:
+          wz = +K * err_px   (positive when tag is to the right)
     """
     valid_set = set(valid_ids)
     deadline = time.time() + timeout_s
@@ -1659,8 +1722,8 @@ def servo_to_visible_tag(
             return True
 
         vx = max(-0.10, min(0.10, 0.45 * err_dist_m))
-        # Positive err_px → tag to the right → turn CW → z negative.
-        wz = max(-24.0, min(24.0, -0.08 * err_px))
+        # Positive err_px → tag to the right → turn CCW → z positive.
+        wz = max(-24.0, min(24.0, 0.08 * err_px))
         dt = 0.15
         ep_chassis.drive_speed(x=vx, y=0.0, z=wz, timeout=dt)
         time.sleep(dt)
@@ -1763,20 +1826,51 @@ def recharge_robot(
 ) -> None:
     if world_map.recharge is None:
         raise RuntimeError("Recharge requested before recharge was mapped.")
+    if RECHARGE_ALIGNMENT_TAG_ID not in RECHARGE_TAG_IDS:
+        raise RuntimeError(
+            f"RECHARGE_ALIGNMENT_TAG_ID={RECHARGE_ALIGNMENT_TAG_ID} is not present in RECHARGE_TAG_IDS."
+        )
     print(
         f"[Recharge] Repositioning from ({pose.x:.3f}, {pose.y:.3f}, {math.degrees(pose.yaw):.1f}°) "
-        f"before final approach to recharge at ({world_map.recharge.x:.3f}, {world_map.recharge.y:.3f})"
+        f"to reacquire recharge tag {RECHARGE_ALIGNMENT_TAG_ID} near "
+        f"({world_map.recharge.x:.3f}, {world_map.recharge.y:.3f})"
     )
-    turn_to_yaw(ep_chassis, pose, math.pi)
-    move_robot(ep_chassis, pose, x_m=2.0)
+    turn_to_yaw(ep_chassis, pose, -math.pi / 2.0)
+    move_robot(ep_chassis, pose, x_m=-0.3)
     print(
-        f"[Recharge] Final turn to face recharge from ({pose.x:.3f}, {pose.y:.3f}, "
-        f"{math.degrees(pose.yaw):.1f}°)"
+        f"[Recharge] Sweeping left to center recharge tag {RECHARGE_ALIGNMENT_TAG_ID} from "
+        f"({pose.x:.3f}, {pose.y:.3f}, {math.degrees(pose.yaw):.1f}°)"
     )
-    face_landmark(ep_chassis, pose, world_map.recharge)
+    tag = sweep_left_until_recharge_tag_centered(
+        ep_camera,
+        ep_chassis,
+        yolo_model,
+        tag_detector,
+        pose,
+        RECHARGE_ALIGNMENT_TAG_ID,
+    )
+    if tag is None:
+        print(
+            f"[Recharge] Could not center recharge tag {RECHARGE_ALIGNMENT_TAG_ID} during the left sweep."
+        )
+        return
+
+    debug_log_tag_mapping(tag, pose, "recharge-final")
+    improved_recharge = landmark_from_tag_detection(tag, "recharge", pose)
+    world_map.recharge = Landmark(
+        kind="recharge",
+        x=improved_recharge.x,
+        y=improved_recharge.y,
+        tag_id=RECHARGE_ALIGNMENT_TAG_ID,
+    )
+    print(
+        f"[Recharge] Updated recharge position from tag {RECHARGE_ALIGNMENT_TAG_ID} to "
+        f"({world_map.recharge.x:.3f}, {world_map.recharge.y:.3f})"
+    )
+
     success = servo_to_visible_tag(
         ep_camera, ep_chassis, yolo_model, tag_detector, pose,
-        RECHARGE_TAG_IDS, target_dist_m=RECHARGE_SERVO_DIST_M,
+        {RECHARGE_ALIGNMENT_TAG_ID}, target_dist_m=RECHARGE_STOP_DIST_M,
     )
     if not success:
         print("[Recharge] Tag servo timed out before reaching the recharge tag.")
@@ -1784,7 +1878,10 @@ def recharge_robot(
 
     ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
     battery.recharge()
-    print(f"[Recharge] Reached recharge tag. Battery now {battery.level:.0f}%")
+    print(
+        f"[Recharge] Reached recharge tag {RECHARGE_ALIGNMENT_TAG_ID} at {RECHARGE_STOP_DIST_M:.2f} m. "
+        f"Battery now {battery.level:.0f}%"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2025,6 +2122,7 @@ def main() -> None:
         execute_mapping_sequence(
             ep_camera, ep_chassis, yolo_model, tag_detector, pose, world_map,
         )
+        print(world_map.summary())
         if args.show_map or args.map_only:
             visualize_map(
                 world_map,
@@ -2039,7 +2137,6 @@ def main() -> None:
             pose, world_map, battery,
             leave_after_recharge=False,
         )
-        print(world_map.summary())
 
         if args.show_map or args.map_only:
             visualize_map(
