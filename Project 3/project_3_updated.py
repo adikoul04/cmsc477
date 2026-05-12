@@ -1715,6 +1715,7 @@ def servo_to_visible_tag(
     valid_ids: Iterable[int],
     target_dist_m: float,
     timeout_s: float = 15.0,
+    straight_approach_center_tol_px: Optional[float] = None,
 ) -> bool:
     """Close-range visual servo to an AprilTag using drive_speed.
 
@@ -1723,6 +1724,11 @@ def servo_to_visible_tag(
       turn CCW (yaw decreases) to centre the tag. drive_speed(z=+ω) is CCW,
       so we use a positive z value when the tag is to the right:
           wz = +K * err_px   (positive when tag is to the right)
+
+    When straight_approach_center_tol_px is provided, the robot will stop
+    steering and drive straight toward the tag whenever the horizontal error
+    is already within that tolerance. This is useful for the recharge approach,
+    where the robot is pre-centered before the final drive-in.
     """
     valid_set = set(valid_ids)
     deadline = time.time() + timeout_s
@@ -1749,8 +1755,16 @@ def servo_to_visible_tag(
             return True
 
         vx = max(-0.10, min(0.10, 0.45 * err_dist_m))
-        # Positive err_px → tag to the right → turn CCW → z positive.
-        wz = max(-24.0, min(24.0, 0.08 * err_px))
+        if (
+            straight_approach_center_tol_px is not None
+            and abs(err_px) <= straight_approach_center_tol_px
+            and err_dist_m > 0.0
+        ):
+            vx = max(0.0, vx)
+            wz = 0.0
+        else:
+            # Positive err_px → tag to the right → turn CCW → z positive.
+            wz = max(-24.0, min(24.0, 0.08 * err_px))
         dt = 0.15
         ep_chassis.drive_speed(x=vx, y=0.0, z=wz, timeout=dt)
         time.sleep(dt)
@@ -1897,7 +1911,9 @@ def recharge_robot(
 
     success = servo_to_visible_tag(
         ep_camera, ep_chassis, yolo_model, tag_detector, pose,
-        {RECHARGE_ALIGNMENT_TAG_ID}, target_dist_m=RECHARGE_STOP_DIST_M,
+        {RECHARGE_ALIGNMENT_TAG_ID},
+        target_dist_m=RECHARGE_STOP_DIST_M,
+        straight_approach_center_tol_px=CENTER_TOL_PX,
     )
     if not success:
         print("[Recharge] Tag servo timed out before reaching the recharge tag.")
