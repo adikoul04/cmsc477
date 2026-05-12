@@ -1617,18 +1617,28 @@ def sweep_left_until_recharge_tag_centered(
                         f"stepping right {corrective_right_step_m:.2f} m to re-center."
                     )
                     move_robot(ep_chassis, pose, y_m=corrective_right_step_m)
-                    total_left_m = min(pose.x, total_left_m + corrective_right_step_m)
+                    total_left_m += corrective_right_step_m
                     continue
                 else:
                     centered_stable = 0
+                    if total_left_m - LEFT_SCAN_STEP_M < 0:
+                        break
+                    move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
+                    total_left_m -= LEFT_SCAN_STEP_M
+                    continue
             else:
                 centered_stable = 0
+                if total_left_m - LEFT_SCAN_STEP_M < 0:
+                    break
+                move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
+                total_left_m -= LEFT_SCAN_STEP_M
+                continue
 
         if total_left_m - LEFT_SCAN_STEP_M < 0:
             break
         move_robot(ep_chassis, pose, y_m=-LEFT_SCAN_STEP_M)
         total_left_m -= LEFT_SCAN_STEP_M
-        
+
 
     return None
 
