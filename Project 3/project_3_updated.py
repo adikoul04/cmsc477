@@ -1731,6 +1731,7 @@ def servo_to_visible_tag(
     where the robot is pre-centered before the final drive-in.
     """
     valid_set = set(valid_ids)
+    straight_approach_active = False
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         frame = read_frame(ep_camera, timeout=0.5)
@@ -1739,6 +1740,10 @@ def servo_to_visible_tag(
         tags, _ = detect_tags_and_objects(frame, yolo_model, tag_detector)
         tag = select_preferred_visible_tag(tags, valid_set)
         if tag is None:
+            if straight_approach_active:
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+                time.sleep(0.1)
+                continue
             # Slowly sweep CW (yaw increases): z negative for drive_speed.
             wz = -10.0
             dt = 0.15
@@ -1755,11 +1760,12 @@ def servo_to_visible_tag(
             return True
 
         vx = max(-0.10, min(0.10, 0.45 * err_dist_m))
-        if (
-            straight_approach_center_tol_px is not None
-            and abs(err_px) <= straight_approach_center_tol_px
-            and err_dist_m > 0.0
-        ):
+        if straight_approach_center_tol_px is not None and not straight_approach_active:
+            straight_approach_active = (
+                abs(err_px) <= straight_approach_center_tol_px and err_dist_m > 0.0
+            )
+
+        if straight_approach_active:
             vx = max(0.0, vx)
             wz = 0.0
         else:
