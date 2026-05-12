@@ -1732,6 +1732,7 @@ def servo_to_visible_tag(
     """
     valid_set = set(valid_ids)
     straight_approach_active = False
+    last_seen_forward_dist_m: Optional[float] = None
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         frame = read_frame(ep_camera, timeout=0.5)
@@ -1743,6 +1744,11 @@ def servo_to_visible_tag(
             if straight_approach_active:
                 ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
                 time.sleep(0.1)
+                if (
+                    last_seen_forward_dist_m is not None
+                    and last_seen_forward_dist_m <= target_dist_m + 0.06
+                ):
+                    return True
                 continue
             # Slowly sweep CW (yaw increases): z negative for drive_speed.
             wz = -10.0
@@ -1754,6 +1760,7 @@ def servo_to_visible_tag(
 
         err_px = center_error_px(float(tag.center[0]))
         err_dist_m = tag_detector.tag_forward_distance_m(tag) - target_dist_m
+        last_seen_forward_dist_m = tag_detector.tag_forward_distance_m(tag)
         if abs(err_px) < 18.0 and abs(err_dist_m) < 0.04:
             ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
             time.sleep(0.1)
@@ -1766,6 +1773,10 @@ def servo_to_visible_tag(
             )
 
         if straight_approach_active:
+            if err_dist_m <= 0.0:
+                ep_chassis.drive_speed(x=0.0, y=0.0, z=0.0, timeout=0.1)
+                time.sleep(0.1)
+                return True
             vx = max(0.0, vx)
             wz = 0.0
             dt = 0.5
